@@ -82,12 +82,27 @@ Green=multiplication, Yellow=division.
   numbers never overlap. Spawns reject a lane too close to an existing alien
   (min gap `ENEMY.MIN_SPAWN_GAP`); if no clear lane, the spawn is skipped.
 - Ship is input-driven only: it lerps horizontally to the targeted alien's x and
-  auto-fires when lined up (`PLAYER.SHOOT_RANGE`, `FIRE_COOLDOWN`).
+  auto-fires when lined up (`PLAYER.SHOOT_RANGE`, `FIRE_COOLDOWN`). The **active
+  target flees upward** while locked (`ENEMY.RETREAT_SPEED`): once its answer is
+  typed it runs from the player and cannot cost a life, so a correct answer is
+  never punished by the ship's travel time. If a fleeing target is at/below the
+  muzzle the shot resolves point-blank.
+- Field is capped at `maxOnScreen` aliens (difficulty-scaled, 4→8); spawns are
+  skipped when full so the screen can't over-populate into an unrecoverable hit.
 - Input: on-screen keypad **and** physical keyboard (0–9, Backspace, Esc).
   Max 2 typed digits.
 - HUD (score, lives, difficulty bar, typed display) draws above gameplay
   (`depth 5`) so entering aliens never obscure it.
 - High score persisted in `localStorage` (`metic-highscore`).
+- **Pause** (`P` key or on-screen `II` button): freezes the field, difficulty
+  timer, spawning and firing, and **hides all aliens + their number balls** (and
+  the typed display) behind an overlay so the player can't solve sums on a break.
+  Tap the overlay or press `P` to resume.
+- **Hit recovery**: on losing a life (but not the last) the player gets breathing
+  room. Mode is runtime-switchable for comparison via `M` (HUD shows `REC: …`):
+  `slowmo` (slow aliens + spawning for `RECOVERY.SLOWMO_MS`), `slowmo_push`
+  (slow-mo + shove all aliens up `PUSHBACK_PX`), `pushback` (shove only), `clear`
+  (wipe the board). Knobs in `RECOVERY` (`src/config/constants.ts`).
 
 ## Difficulty design
 
@@ -108,6 +123,7 @@ d(t) = 1 / (1 + e^(-k · (t - t0)))
 | Fall speed     | 28   | 110 px/s |
 | Home speed     | 45   | 150 px/s (speed-up below `HOME_TRIGGER_Y`) |
 | Spawn interval | 2200 | 650 ms |
+| Max on screen  | 4    | 8    |
 | Max balls      | 2    | 3    |
 | Max digit      | 3    | 9    |
 
@@ -138,6 +154,24 @@ curve is in `src/config/difficulty.ts`.
 ## Decision Log
 
 Newest first. Format: `YYYY-MM-DD — decision — rationale`.
+
+- **2026-05-29 — Locked target flees upward instead of freezing.** A correctly
+  answered alien now turns and runs from the player (`RETREAT_SPEED`) rather than
+  stopping in place — reads as "running away" and still gives the ship time to
+  line up the shot fairly.
+- **2026-05-28 — Freeze the locked target + cap on-screen aliens.** A correct
+  answer was unfairly punished because the target kept falling while the ship
+  slid over; now the target freezes (and can't cost a life) once typed, the ship
+  slides faster (`MOVE_LERP` 0.12→0.22), and the field is capped (4→8) so it
+  can't over-populate into an unrecoverable state. Point-blank shot resolves a
+  target frozen at the muzzle.
+
+- **2026-05-28 — Pause hides the field.** A pause (P / button) freezes everything
+  and hides aliens + numbers so the player can rest without solving sums on break.
+- **2026-05-28 — Hit-recovery grace, mode-switchable for playtesting.** Losing a
+  life on a crowded screen death-spirals; give breathing room. Four modes
+  (slowmo / slowmo_push / pushback / clear) are cyclable at runtime via `M` so the
+  best feel can be chosen by playing; default `slowmo`.
 
 - **2026-05-28 — Add self-updating AGENTS.md.** Capture architecture, difficulty,
   asset layouts, and roadmap so context is portable across machines/sessions.

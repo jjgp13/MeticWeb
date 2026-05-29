@@ -8,6 +8,7 @@ export interface DifficultyParams {
   spawnInterval: number;
   maxBalls: number;
   maxDigit: number;
+  maxOnScreen: number;
 }
 
 type Range = { easy: number; hard: number };
@@ -30,5 +31,6 @@ export function difficultyAt(elapsedMs: number): DifficultyParams {
     spawnInterval: lerp(DIFFICULTY.SPAWN_INTERVAL),
     maxBalls: Math.round(lerp(DIFFICULTY.MAX_BALLS)),
     maxDigit: Math.round(lerp(DIFFICULTY.MAX_DIGIT)),
+    maxOnScreen: Math.round(lerp(DIFFICULTY.MAX_ON_SCREEN)),
   };
 }

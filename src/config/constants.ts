@@ -10,7 +10,7 @@ export const GAME = {
 
 export const PLAYER = {
   Y: 430, // fixed vertical line the ship rides on (keypad sits below it)
-  MOVE_LERP: 0.12, // how snappily the ship slides toward a target (0..1)
+  MOVE_LERP: 0.22, // how snappily the ship slides toward a target (0..1)
   SHOOT_RANGE: 6, // px tolerance to consider "lined up" and fire
   LIVES: 3,
   FIRE_COOLDOWN: 250, // ms between shots
@@ -24,6 +24,7 @@ export const ENEMY = {
   HOME_TRIGGER_Y: 220, // y after which an alien speeds up toward the player
   MIN_SPAWN_GAP: 84, // px min horizontal distance between alien lanes
   BASE_POINTS: 50, // base score per ball
+  RETREAT_SPEED: 150, // px/sec a locked (correctly-answered) alien flees upward
 } as const;
 
 /**
@@ -52,11 +53,34 @@ export const DIFFICULTY = {
   // ms between spawns (easy = slow/sparse, hard = fast/dense).
   SPAWN_INTERVAL: { easy: 2200, hard: 650 },
 
+  // Hard cap on aliens alive at once, so the field never gets so crowded that a
+  // single hit becomes unrecoverable.
+  MAX_ON_SCREEN: { easy: 4, hard: 8 },
+
   // A sum needs at least two numbers, so always >= 2 balls.
   MIN_BALLS: 2,
   MAX_BALLS: { easy: 2, hard: 3 },
   MAX_DIGIT: { easy: 3, hard: 9 },
 } as const;
+
+/**
+ * Hit-recovery: after losing a life on a crowded screen the player needs a
+ * moment to recover or the run death-spirals. Several modes are implemented so
+ * their feel can be compared live in-game (press M to cycle, see HUD label):
+ *   - slowmo:      briefly slow every alien + spawning to give reaction time.
+ *   - slowmo_push: slow-mo AND shove all aliens back up the screen.
+ *   - pushback:    only shove all aliens back up (no slow-mo).
+ *   - clear:       wipe the whole board on every hit (most forgiving).
+ */
+export const RECOVERY = {
+  MODES: ["slowmo", "slowmo_push", "pushback", "clear"] as const,
+  DEFAULT_MODE: "slowmo",
+  SLOWMO_MS: 3000, // duration of the slow-motion grace window
+  SLOW_FACTOR: 0.4, // alien speed + spawn multiplier during the grace window
+  PUSHBACK_PX: 90, // how far aliens are shoved back up on a hit
+} as const;
+
+export type RecoveryMode = (typeof RECOVERY.MODES)[number];
 
 /** Number ball colors map to future math operations (sum/sub/mul/div). */
 export const BALL_COLOR = {

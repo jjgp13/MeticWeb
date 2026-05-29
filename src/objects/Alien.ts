@@ -72,6 +72,35 @@ export default class Alien extends Phaser.Physics.Arcade.Sprite {
     });
   }
 
+  /** Flee straight up (used while locked: the player answered correctly). */
+  public retreat(delta: number, speed: number): void {
+    const dt = delta / 1000;
+    this.y = Math.max(8, this.y - speed * dt);
+    const spacing = 16;
+    const totalW = (this.balls.length - 1) * spacing;
+    this.balls.forEach((ball, i) => {
+      ball.x = this.x - totalW / 2 + i * spacing;
+      ball.y = this.y - 22;
+    });
+  }
+
+  /** Shove the alien (and its balls) back up the screen, clamped to the top. */
+  public pushBack(px: number): void {
+    this.y = Math.max(-20, this.y - px);
+    const spacing = 16;
+    const totalW = (this.balls.length - 1) * spacing;
+    this.balls.forEach((ball, i) => {
+      ball.x = this.x - totalW / 2 + i * spacing;
+      ball.y = this.y - 22;
+    });
+  }
+
+  /** Show/hide the body and its number balls together (used while paused). */
+  public setVisibleAll(visible: boolean): void {
+    this.setVisible(visible);
+    this.balls.forEach((b) => b.setVisible(visible));
+  }
+
   /** Clean up the alien and its balls together. */
   public kill(): void {
     this.balls.forEach((b) => b.destroy());

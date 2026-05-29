@@ -1,5 +1,13 @@
 import Phaser from "phaser";
-import { BULLET, DIFFICULTY, ENEMY, GAME, PLAYER } from "../config/constants";
+import {
+  BULLET,
+  DIFFICULTY,
+  ENEMY,
+  GAME,
+  PLAYER,
+  RECOVERY,
+  type RecoveryMode,
+} from "../config/constants";
 import { difficultyAt } from "../config/difficulty";
 import Alien from "../objects/Alien";
 
@@ -32,6 +40,16 @@ export default class GameScene extends Phaser.Scene {
   private elapsedMs = 0;
   private spawnCountdown = 0;
   private diffBar!: Phaser.GameObjects.Rectangle;
+
+  // Hit-recovery: which mode is active and when the slow-mo grace window ends.
+  private recoveryMode: RecoveryMode = RECOVERY.DEFAULT_MODE;
+  private recoveryUntil = 0;
+  private recoveryText!: Phaser.GameObjects.Text;
+
+  // Pause: while paused the field is frozen and aliens are hidden so the
+  // player can't keep solving sums during the break.
+  private paused = false;
+  private pauseOverlay: Phaser.GameObjects.GameObject[] = [];
 
   constructor() {
     super("GameScene");
@@ -95,13 +113,25 @@ export default class GameScene extends Phaser.Scene {
     this.elapsedMs = 0;
     this.spawnCountdown = 0;
     this.gameOver = false;
+    this.recoveryUntil = 0;
+    this.paused = false;
+    this.pauseOverlay = [];
   }
 
   update(time: number, delta: number): void {
-    if (this.gameOver) return;
+    if (this.gameOver || this.paused) return;
 
     this.elapsedMs += delta;
     const diff = difficultyAt(this.elapsedMs);
+
+    // During the post-hit grace window everything in the field moves in slow
+    // motion (the difficulty timer itself keeps running).
+    const slow =
+      time < this.recoveryUntil &&
+      (this.recoveryMode === "slowmo" || this.recoveryMode === "slowmo_push")
+        ? RECOVERY.SLOW_FACTOR
+        : 1;
+    const fieldDelta = delta * slow;
 
     // Drift stars downward with parallax; wrap back to the top.
     for (const s of this.starSprites) {
@@ -114,7 +144,7 @@ export default class GameScene extends Phaser.Scene {
     this.diffBar.setSize(diff.d * (GAME.WIDTH - 24), 4); // show ramp progress
 
     // Spawn on a difficulty-scaled interval (faster over time).
-    this.spawnCountdown -= delta;
+    this.spawnCountdown -= fieldDelta;
     if (this.spawnCountdown <= 0) {
       this.spawnAlien();
       this.spawnCountdown = diff.spawnInterval;
@@ -124,10 +154,17 @@ export default class GameScene extends Phaser.Scene {
     const typedVal = this.typed === "" ? -1 : parseInt(this.typed, 10);
     this.target = this.enemiesInField.get(typedVal) ?? null;
 
-    // Advance every alien; detect ones that reached the player line.
+    // Advance every alien; detect ones that reached the player line. The active
+    // target FLEES upward: once the player has typed its answer it turns and
+    // runs from the player while the ship lines up the shot, so a correct answer
+    // is never punished by the ship's travel time.
     this.aliens.getChildren().forEach((obj) => {
       const alien = obj as Alien;
-      alien.advance(delta);
+      if (alien === this.target) {
+        alien.retreat(fieldDelta, ENEMY.RETREAT_SPEED);
+        return;
+      }
+      alien.advance(fieldDelta);
       if (alien.y >= PLAYER.Y - 6) this.onAlienReachedPlayer(alien);
     });
 
@@ -138,7 +175,7 @@ export default class GameScene extends Phaser.Scene {
         Math.abs(this.ship.x - this.target.x) < PLAYER.SHOOT_RANGE &&
         time - this.lastFire > PLAYER.FIRE_COOLDOWN
       ) {
-        this.fire(time);
+        this.fire(time, this.target);
       }
     }
 
@@ -156,6 +193,10 @@ export default class GameScene extends Phaser.Scene {
     if (this.gameOver) return;
 
     const diff = difficultyAt(this.elapsedMs);
+
+    // Don't let the field over-populate — a crowded screen makes a single hit
+    // unrecoverable.
+    if (this.aliens.getLength() >= diff.maxOnScreen) return;
 
     // Build a unique result so each typed number maps to exactly one alien.
     // Ball count (>= 2, so it is always a real sum) and digit size scale up.
@@ -210,7 +251,7 @@ export default class GameScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
   // Combat
   // ---------------------------------------------------------------------------
-  private fire(time: number): void {
+  private fire(time: number, target: Alien | null): void {
     this.lastFire = time;
     const bullet = this.bullets.create(
       this.ship.x,
@@ -222,6 +263,12 @@ export default class GameScene extends Phaser.Scene {
     this.sound.play("shoot", { volume: 0.4 });
     // Clear the typed answer once we have committed to a shot.
     this.setTyped("");
+
+    // If the locked target sits at/below the muzzle, an upward bullet can't
+    // reach it, so resolve the hit point-blank to guarantee the kill.
+    if (target && target.active && target.y >= this.ship.y - 24) {
+      this.onBulletHit(bullet, target);
+    }
   }
 
   private onBulletHit(bullet: Phaser.Physics.Arcade.Sprite, alien: Alien): void {
@@ -284,7 +331,81 @@ export default class GameScene extends Phaser.Scene {
     const icon = this.lifeIcons[this.lives];
     if (icon) icon.setAlpha(0.15);
     this.cameras.main.shake(150, 0.01);
-    if (this.lives <= 0) this.endGame();
+    if (this.lives <= 0) {
+      this.endGame();
+      return;
+    }
+    this.applyRecovery();
+  }
+
+  /** Give the player breathing room after a hit, per the active recovery mode. */
+  private applyRecovery(): void {
+    const now = this.time.now;
+    switch (this.recoveryMode) {
+      case "slowmo":
+        this.recoveryUntil = now + RECOVERY.SLOWMO_MS;
+        break;
+      case "slowmo_push":
+        this.recoveryUntil = now + RECOVERY.SLOWMO_MS;
+        this.aliens.getChildren().forEach((o) =>
+          (o as Alien).pushBack(RECOVERY.PUSHBACK_PX),
+        );
+        break;
+      case "pushback":
+        this.aliens.getChildren().forEach((o) =>
+          (o as Alien).pushBack(RECOVERY.PUSHBACK_PX),
+        );
+        break;
+      case "clear":
+        this.aliens.getChildren().slice().forEach((o) => {
+          const a = o as Alien;
+          this.explode(a.x, a.y);
+          a.kill();
+        });
+        this.enemiesInField.clear();
+        this.target = null;
+        this.setTyped("");
+        break;
+    }
+  }
+
+  private cycleRecoveryMode(): void {
+    const modes = RECOVERY.MODES;
+    const i = modes.indexOf(this.recoveryMode);
+    this.recoveryMode = modes[(i + 1) % modes.length];
+    this.recoveryText.setText(`REC: ${this.recoveryMode}`);
+  }
+
+  /** Freeze the field and hide aliens so the player can't solve while paused. */
+  private togglePause(): void {
+    if (this.gameOver) return;
+    this.paused = !this.paused;
+
+    if (this.paused) {
+      this.aliens.getChildren().forEach((o) => (o as Alien).setVisibleAll(false));
+      this.typedText.setVisible(false);
+
+      const dim = this.add
+        .rectangle(GAME.WIDTH / 2, GAME.HEIGHT / 2, GAME.WIDTH, GAME.HEIGHT, 0x05060f, 0.92)
+        .setDepth(9)
+        .setInteractive();
+      dim.on("pointerdown", () => this.togglePause());
+      const label = this.add
+        .text(GAME.WIDTH / 2, GAME.HEIGHT / 2, "PAUSED\n\ntap / P to resume", {
+          fontFamily: "monospace",
+          fontSize: "28px",
+          color: "#4ea1ff",
+          align: "center",
+        })
+        .setOrigin(0.5)
+        .setDepth(10);
+      this.pauseOverlay = [dim, label];
+    } else {
+      this.pauseOverlay.forEach((o) => o.destroy());
+      this.pauseOverlay = [];
+      this.aliens.getChildren().forEach((o) => (o as Alien).setVisibleAll(true));
+      this.typedText.setVisible(true);
+    }
   }
 
   private buildHud(): void {
@@ -324,6 +445,27 @@ export default class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(HUD_DEPTH);
+
+    // Recovery-mode label (press M to cycle) for comparing hit-recovery feels.
+    this.recoveryText = this.add
+      .text(12, 56, `REC: ${this.recoveryMode}`, {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#7a86b8",
+      })
+      .setDepth(HUD_DEPTH);
+
+    // Pause button (also bound to the P key).
+    const pauseBtn = this.add
+      .text(GAME.WIDTH / 2, 22, "II", {
+        fontFamily: "monospace",
+        fontSize: "20px",
+        color: "#4ea1ff",
+      })
+      .setOrigin(0.5)
+      .setDepth(HUD_DEPTH)
+      .setInteractive({ useHandCursor: true });
+    pauseBtn.on("pointerdown", () => this.togglePause());
   }
 
   // ---------------------------------------------------------------------------
@@ -360,6 +502,14 @@ export default class GameScene extends Phaser.Scene {
 
   private bindKeyboard(): void {
     this.input.keyboard?.on("keydown", (e: KeyboardEvent) => {
+      if (e.key === "p" || e.key === "P") {
+        this.togglePause();
+        return;
+      }
+      if (e.key === "m" || e.key === "M") {
+        this.cycleRecoveryMode();
+        return;
+      }
       if (e.key >= "0" && e.key <= "9") this.handleInput(e.key);
       else if (e.key === "Backspace") this.handleInput("<");
       else if (e.key === "Escape") this.handleInput("C");
@@ -372,6 +522,7 @@ export default class GameScene extends Phaser.Scene {
       this.scene.restart();
       return;
     }
+    if (this.paused) return;
     this.sound.play("blip", { volume: 0.3 });
     if (key === "C") this.setTyped("");
     else if (key === "<") this.setTyped(this.typed.slice(0, -1));
