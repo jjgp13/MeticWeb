@@ -5,8 +5,10 @@ import {
   ENEMY,
   GAME,
   PLAYER,
+  RANKS,
   RECOVERY,
-  type RecoveryMode,
+  SCORE,
+  STORAGE,
 } from "../config/constants";
 import { difficultyAt } from "../config/difficulty";
 import Alien from "../objects/Alien";
@@ -32,6 +34,13 @@ export default class GameScene extends Phaser.Scene {
   private score = 0;
   private lives: number = PLAYER.LIVES;
   private lifeIcons: Phaser.GameObjects.Image[] = [];
+
+  // Skill scoring: streak of kills without a hit + per-run mastery tracking.
+  private combo = 0;
+  private comboText!: Phaser.GameObjects.Text;
+  private killsThisRun = 0;
+  private bestComboThisRun = 0;
+  private fastestSolveMs = Infinity;
   private lastSpawnX = -999;
   private lastFire = 0;
   private gameOver = false;
@@ -41,10 +50,8 @@ export default class GameScene extends Phaser.Scene {
   private spawnCountdown = 0;
   private diffBar!: Phaser.GameObjects.Rectangle;
 
-  // Hit-recovery: which mode is active and when the slow-mo grace window ends.
-  private recoveryMode: RecoveryMode = RECOVERY.DEFAULT_MODE;
+  // Hit-recovery: a short slow-motion grace window after a hit.
   private recoveryUntil = 0;
-  private recoveryText!: Phaser.GameObjects.Text;
 
   // Pause: while paused the field is frozen and aliens are hidden so the
   // player can't keep solving sums during the break.
@@ -108,6 +115,10 @@ export default class GameScene extends Phaser.Scene {
     this.score = 0;
     this.lives = PLAYER.LIVES;
     this.lifeIcons = [];
+    this.combo = 0;
+    this.killsThisRun = 0;
+    this.bestComboThisRun = 0;
+    this.fastestSolveMs = Infinity;
     this.lastSpawnX = -999;
     this.lastFire = 0;
     this.elapsedMs = 0;
@@ -126,11 +137,7 @@ export default class GameScene extends Phaser.Scene {
 
     // During the post-hit grace window everything in the field moves in slow
     // motion (the difficulty timer itself keeps running).
-    const slow =
-      time < this.recoveryUntil &&
-      (this.recoveryMode === "slowmo" || this.recoveryMode === "slowmo_push")
-        ? RECOVERY.SLOW_FACTOR
-        : 1;
+    const slow = time < this.recoveryUntil ? RECOVERY.SLOW_FACTOR : 1;
     const fieldDelta = delta * slow;
 
     // Drift stars downward with parallax; wrap back to the top.
@@ -232,17 +239,18 @@ export default class GameScene extends Phaser.Scene {
     this.lastSpawnX = x;
 
     const bodyKey = `alien${Phaser.Math.Between(1, 13)}`;
-    const alien = new Alien(
-      this,
+    // Personality: fewer balls (easier sum) => faster; more balls => slower.
+    const speedScale = ENEMY.SPEED_BY_BALLS[digits.length] ?? 1;
+    const alien = new Alien(this, {
       x,
-      -20,
+      y: -20,
       bodyKey,
       result,
       digits,
-      "blueBalls",
-      diff.fallSpeed,
-      diff.homeSpeed,
-    );
+      ballTexture: "blueBalls",
+      fallSpeed: diff.fallSpeed * speedScale,
+      homeSpeed: diff.homeSpeed * speedScale,
+    });
     alien.setScale(1.5);
     this.aliens.add(alien);
     this.enemiesInField.set(result, alien);
@@ -273,9 +281,17 @@ export default class GameScene extends Phaser.Scene {
 
   private onBulletHit(bullet: Phaser.Physics.Arcade.Sprite, alien: Alien): void {
     if (!alien.active) return;
-    const points = alien.result // higher sums are worth a touch more
-      ? Math.max(ENEMY.BASE_POINTS, alien.result * 10)
-      : ENEMY.BASE_POINTS;
+
+    const solveMs = this.time.now - alien.spawnedAt;
+
+    // Extend the streak first so this kill is scored with its own multiplier.
+    this.combo += 1;
+    this.killsThisRun += 1;
+    this.bestComboThisRun = Math.max(this.bestComboThisRun, this.combo);
+    this.fastestSolveMs = Math.min(this.fastestSolveMs, solveMs);
+    this.updateComboText();
+
+    const points = this.computeScore(alien.ballCount, solveMs);
 
     this.explode(alien.x, alien.y);
     this.addScore(points, alien.x, alien.y);
@@ -283,6 +299,29 @@ export default class GameScene extends Phaser.Scene {
     this.enemiesInField.delete(alien.result);
     alien.kill();
     bullet.destroy();
+  }
+
+  /** points = BASE * ballCountBonus * speedBonus * difficultyMult * comboMult. */
+  private computeScore(ballCount: number, solveMs: number): number {
+    const ballBonus = SCORE.BALL_COUNT_BONUS[ballCount] ?? 1;
+
+    const span = SCORE.SLOW_MS - SCORE.FAST_MS;
+    const t = Phaser.Math.Clamp((solveMs - SCORE.FAST_MS) / span, 0, 1);
+    const speedBonus = SCORE.FAST_MULT + (SCORE.SLOW_MULT - SCORE.FAST_MULT) * t;
+
+    const difficultyMult = 1 + difficultyAt(this.elapsedMs).d;
+    const comboMult = Math.min(SCORE.COMBO_MAX, 1 + (this.combo - 1) * SCORE.COMBO_STEP);
+
+    return Math.round(SCORE.BASE * ballBonus * speedBonus * difficultyMult * comboMult);
+  }
+
+  private updateComboText(): void {
+    if (this.combo >= 2) {
+      const mult = Math.min(SCORE.COMBO_MAX, 1 + (this.combo - 1) * SCORE.COMBO_STEP);
+      this.comboText.setText(`x${mult.toFixed(2)}  (${this.combo} streak)`);
+    } else {
+      this.comboText.setText("");
+    }
   }
 
   private onAlienReachedPlayer(alien: Alien): void {
@@ -328,6 +367,8 @@ export default class GameScene extends Phaser.Scene {
   private loseLife(): void {
     this.sound.play("hurt", { volume: 0.5 });
     this.lives = Math.max(0, this.lives - 1);
+    this.combo = 0; // a hit breaks the streak
+    this.updateComboText();
     const icon = this.lifeIcons[this.lives];
     if (icon) icon.setAlpha(0.15);
     this.cameras.main.shake(150, 0.01);
@@ -335,45 +376,8 @@ export default class GameScene extends Phaser.Scene {
       this.endGame();
       return;
     }
-    this.applyRecovery();
-  }
-
-  /** Give the player breathing room after a hit, per the active recovery mode. */
-  private applyRecovery(): void {
-    const now = this.time.now;
-    switch (this.recoveryMode) {
-      case "slowmo":
-        this.recoveryUntil = now + RECOVERY.SLOWMO_MS;
-        break;
-      case "slowmo_push":
-        this.recoveryUntil = now + RECOVERY.SLOWMO_MS;
-        this.aliens.getChildren().forEach((o) =>
-          (o as Alien).pushBack(RECOVERY.PUSHBACK_PX),
-        );
-        break;
-      case "pushback":
-        this.aliens.getChildren().forEach((o) =>
-          (o as Alien).pushBack(RECOVERY.PUSHBACK_PX),
-        );
-        break;
-      case "clear":
-        this.aliens.getChildren().slice().forEach((o) => {
-          const a = o as Alien;
-          this.explode(a.x, a.y);
-          a.kill();
-        });
-        this.enemiesInField.clear();
-        this.target = null;
-        this.setTyped("");
-        break;
-    }
-  }
-
-  private cycleRecoveryMode(): void {
-    const modes = RECOVERY.MODES;
-    const i = modes.indexOf(this.recoveryMode);
-    this.recoveryMode = modes[(i + 1) % modes.length];
-    this.recoveryText.setText(`REC: ${this.recoveryMode}`);
+    // Slow-motion grace window so the player can recover after a hit.
+    this.recoveryUntil = this.time.now + RECOVERY.SLOWMO_MS;
   }
 
   /** Freeze the field and hide aliens so the player can't solve while paused. */
@@ -446,12 +450,12 @@ export default class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(HUD_DEPTH);
 
-    // Recovery-mode label (press M to cycle) for comparing hit-recovery feels.
-    this.recoveryText = this.add
-      .text(12, 56, `REC: ${this.recoveryMode}`, {
+    // Combo / streak multiplier indicator.
+    this.comboText = this.add
+      .text(12, 56, "", {
         fontFamily: "monospace",
-        fontSize: "12px",
-        color: "#7a86b8",
+        fontSize: "14px",
+        color: "#ffd166",
       })
       .setDepth(HUD_DEPTH);
 
@@ -506,10 +510,6 @@ export default class GameScene extends Phaser.Scene {
         this.togglePause();
         return;
       }
-      if (e.key === "m" || e.key === "M") {
-        this.cycleRecoveryMode();
-        return;
-      }
       if (e.key >= "0" && e.key <= "9") this.handleInput(e.key);
       else if (e.key === "Backspace") this.handleInput("<");
       else if (e.key === "Escape") this.handleInput("C");
@@ -540,14 +540,32 @@ export default class GameScene extends Phaser.Scene {
   private endGame(): void {
     this.gameOver = true;
 
-    const best = Math.max(this.score, Number(localStorage.getItem("metic-highscore") ?? 0));
-    localStorage.setItem("metic-highscore", String(best));
+    // Merge this run into the persistent mastery stats.
+    const num = (k: string) => Number(localStorage.getItem(k) ?? 0);
+    const best = Math.max(this.score, num(STORAGE.HIGHSCORE));
+    const bestCombo = Math.max(this.bestComboThisRun, num(STORAGE.BEST_COMBO));
+    const totalKills = num(STORAGE.TOTAL_KILLS) + this.killsThisRun;
+    const priorFastest = num(STORAGE.FASTEST_MS); // 0 = none recorded yet
+    const fastest =
+      this.fastestSolveMs === Infinity
+        ? priorFastest
+        : priorFastest === 0
+          ? this.fastestSolveMs
+          : Math.min(priorFastest, this.fastestSolveMs);
+
+    localStorage.setItem(STORAGE.HIGHSCORE, String(best));
+    localStorage.setItem(STORAGE.BEST_COMBO, String(bestCombo));
+    localStorage.setItem(STORAGE.TOTAL_KILLS, String(totalKills));
+    localStorage.setItem(STORAGE.FASTEST_MS, String(fastest));
+
+    const rank = RANKS.reduce((acc, r) => (best >= r.min ? r.name : acc), RANKS[0].name);
+    const fastestStr = fastest > 0 ? `${(fastest / 1000).toFixed(2)}s` : "—";
 
     this.add
       .rectangle(GAME.WIDTH / 2, GAME.HEIGHT / 2, GAME.WIDTH, GAME.HEIGHT, 0x05060f, 0.8)
       .setDepth(10);
     this.add
-      .text(GAME.WIDTH / 2, GAME.HEIGHT / 2 - 60, "GAME OVER", {
+      .text(GAME.WIDTH / 2, GAME.HEIGHT / 2 - 110, "GAME OVER", {
         fontFamily: "monospace",
         fontSize: "40px",
         color: "#ef476f",
@@ -555,11 +573,21 @@ export default class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(11);
     this.add
+      .text(GAME.WIDTH / 2, GAME.HEIGHT / 2 - 60, `Rank: ${rank}`, {
+        fontFamily: "monospace",
+        fontSize: "24px",
+        color: "#ffd166",
+      })
+      .setOrigin(0.5)
+      .setDepth(11);
+    this.add
       .text(
         GAME.WIDTH / 2,
-        GAME.HEIGHT / 2,
-        `Score: ${this.score}\nBest:  ${best}`,
-        { fontFamily: "monospace", fontSize: "22px", color: "#ffffff", align: "center" },
+        GAME.HEIGHT / 2 + 10,
+        `Score: ${this.score}    Best: ${best}\n` +
+          `Best combo: ${bestCombo}    Kills: ${totalKills}\n` +
+          `Fastest solve: ${fastestStr}`,
+        { fontFamily: "monospace", fontSize: "16px", color: "#ffffff", align: "center", lineSpacing: 8 },
       )
       .setOrigin(0.5)
       .setDepth(11);

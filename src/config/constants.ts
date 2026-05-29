@@ -23,8 +23,54 @@ export const BULLET = {
 export const ENEMY = {
   HOME_TRIGGER_Y: 220, // y after which an alien speeds up toward the player
   MIN_SPAWN_GAP: 84, // px min horizontal distance between alien lanes
-  BASE_POINTS: 50, // base score per ball
   RETREAT_SPEED: 150, // px/sec a locked (correctly-answered) alien flees upward
+
+  // Personality: speed scales INVERSELY with how many numbers an alien carries.
+  // A 2-number sum is quick to solve, so those aliens dart in faster; 3+ numbers
+  // are harder, so they lumber. Keyed by ball count (falls back to 1).
+  SPEED_BY_BALLS: { 2: 1.25, 3: 0.85, 4: 0.6 } as Record<number, number>,
+} as const;
+
+/**
+ * Skill-based scoring. Points reward harder sums, faster solving, later game and
+ * uninterrupted streaks:
+ *
+ *   points = BASE * ballCountBonus * speedBonus * difficultyMult * comboMult
+ *
+ * - ballCountBonus: harder (more-number) sums pay more.
+ * - speedBonus: solving within FAST_MS pays FAST_MULT, decaying to SLOW_MULT by
+ *   SLOW_MS (measured from when the alien spawned).
+ * - difficultyMult: 1 + d, so late-game kills are worth up to ~2x.
+ * - comboMult: consecutive kills without losing a life raise the multiplier by
+ *   COMBO_STEP each, capped at COMBO_MAX; a hit resets the streak.
+ */
+export const SCORE = {
+  BASE: 50,
+  BALL_COUNT_BONUS: { 2: 1.0, 3: 1.6, 4: 2.4 } as Record<number, number>,
+  FAST_MS: 1500, // solved at/under this -> full speed bonus
+  SLOW_MS: 6000, // solved at/over this -> no speed bonus
+  FAST_MULT: 2.0,
+  SLOW_MULT: 1.0,
+  COMBO_STEP: 0.25, // multiplier gained per consecutive kill
+  COMBO_MAX: 4.0,
+} as const;
+
+/** Mastery ranks shown on game over, keyed by best-score thresholds. */
+export const RANKS: ReadonlyArray<{ min: number; name: string }> = [
+  { min: 0, name: "Rookie" },
+  { min: 2000, name: "Cadet" },
+  { min: 6000, name: "Pilot" },
+  { min: 15000, name: "Ace" },
+  { min: 30000, name: "Commander" },
+  { min: 60000, name: "Legend" },
+];
+
+/** localStorage keys for the high score and persistent mastery stats. */
+export const STORAGE = {
+  HIGHSCORE: "metic-highscore",
+  BEST_COMBO: "metic-best-combo",
+  TOTAL_KILLS: "metic-total-kills",
+  FASTEST_MS: "metic-fastest-ms",
 } as const;
 
 /**
@@ -65,22 +111,13 @@ export const DIFFICULTY = {
 
 /**
  * Hit-recovery: after losing a life on a crowded screen the player needs a
- * moment to recover or the run death-spirals. Several modes are implemented so
- * their feel can be compared live in-game (press M to cycle, see HUD label):
- *   - slowmo:      briefly slow every alien + spawning to give reaction time.
- *   - slowmo_push: slow-mo AND shove all aliens back up the screen.
- *   - pushback:    only shove all aliens back up (no slow-mo).
- *   - clear:       wipe the whole board on every hit (most forgiving).
+ * moment to recover. A short slow-motion grace window slows the whole field so
+ * there is time to read and answer the next sum.
  */
 export const RECOVERY = {
-  MODES: ["slowmo", "slowmo_push", "pushback", "clear"] as const,
-  DEFAULT_MODE: "slowmo",
   SLOWMO_MS: 3000, // duration of the slow-motion grace window
   SLOW_FACTOR: 0.4, // alien speed + spawn multiplier during the grace window
-  PUSHBACK_PX: 90, // how far aliens are shoved back up on a hit
 } as const;
-
-export type RecoveryMode = (typeof RECOVERY.MODES)[number];
 
 /** Number ball colors map to future math operations (sum/sub/mul/div). */
 export const BALL_COLOR = {

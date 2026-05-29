@@ -50,7 +50,9 @@ src/
     BootScene.ts      Preloads assets; defers animations (static frames for now)
     GameScene.ts      The core loop: spawn, input, targeting, combat, HUD
   objects/
-    Alien.ts          Alien body sprite + its number balls + lane-fall movement
+    Alien.ts          Alien body + number balls; movement driven by `behavior`.
+                      Constructed from a single `AlienConfig` object so new
+                      per-personality fields (speed, behavior, color) slot in.
 ```
 
 ### How assets are imported
@@ -77,7 +79,15 @@ Green=multiplication, Yellow=division.
 
 - Each alien carries **≥ 2 number balls** (a sum needs two numbers); `result` =
   sum of the balls. `enemiesInField: Map<result, Alien>` keeps results unique so
-  a typed number maps to exactly one target.
+  a typed number maps to exactly one target. **Personality:** speed scales
+  inversely with ball count (`ENEMY.SPEED_BY_BALLS`) — 2-number aliens dart in,
+  3+ lumber.
+- **Scoring** rewards skill (`SCORE` in constants):
+  `BASE × ballCountBonus × speedBonus × difficultyMult × comboMult`, where speed
+  bonus decays from solving fast→slow, difficulty = `1 + d`, and the combo
+  multiplier grows with an unbroken kill streak (a hit resets it).
+- **Mastery stats** persist in `localStorage` (`STORAGE.*`): high score, best
+  combo, total kills, fastest solve; a rank (`RANKS`) is shown on game over.
 - Aliens fall in **fixed vertical lanes** (no horizontal homing) so sprites and
   numbers never overlap. Spawns reject a lane too close to an existing alien
   (min gap `ENEMY.MIN_SPAWN_GAP`); if no clear lane, the spawn is skipped.
@@ -98,11 +108,9 @@ Green=multiplication, Yellow=division.
   timer, spawning and firing, and **hides all aliens + their number balls** (and
   the typed display) behind an overlay so the player can't solve sums on a break.
   Tap the overlay or press `P` to resume.
-- **Hit recovery**: on losing a life (but not the last) the player gets breathing
-  room. Mode is runtime-switchable for comparison via `M` (HUD shows `REC: …`):
-  `slowmo` (slow aliens + spawning for `RECOVERY.SLOWMO_MS`), `slowmo_push`
-  (slow-mo + shove all aliens up `PUSHBACK_PX`), `pushback` (shove only), `clear`
-  (wipe the board). Knobs in `RECOVERY` (`src/config/constants.ts`).
+- **Hit recovery**: on losing a life (but not the last) a short slow-motion grace
+  window (`RECOVERY.SLOWMO_MS` at `SLOW_FACTOR`) slows the whole field so the
+  player can read and answer the next sum and recover.
 
 ## Difficulty design
 
@@ -135,12 +143,18 @@ curve is in `src/config/difficulty.ts`.
 1. [x] Core loop (keypad/keyboard input)
 2. [x] Static sprites + logistic difficulty ramp + parallax starfield
 3. [x] ≥2-number sums + no-overlap lanes
-4. [ ] **Handwriting input** — draw a digit on a canvas overlay; recognize it as
-       the typed number (alongside the keypad). Next up.
-5. [ ] Other operations (subtraction/multiplication/division) via color-coded balls
-6. [ ] Sprite animations + richer explosion/background VFX
-7. [ ] Leaderboard backend (Supabase or Firebase) + world leaderboard
-8. [ ] PvP multiplayer (Colyseus / WebSockets)
+4. [x] Pause (hides field) + slow-mo hit recovery
+5. [x] Fair targeting: locked target flees upward; concurrent-alien cap
+6. [x] Enemy personality by ball count + skill-based scoring + mastery ranks
+7. [ ] **Drifter bonus enemy** — non-lethal alien that crosses horizontally
+       (`behavior: "wander"`); spot & solve it for bonus points, no life cost.
+       Next up.
+8. [ ] **Handwriting input** — draw a digit on a canvas overlay; recognize it as
+       the typed number (alongside the keypad).
+9. [ ] Other operations (subtraction/multiplication/division) via color-coded balls
+10. [ ] Sprite animations + richer explosion/background VFX
+11. [ ] Leaderboard backend (Supabase or Firebase) + world leaderboard
+12. [ ] PvP multiplayer (Colyseus / WebSockets)
 
 ## Conventions
 
@@ -154,6 +168,19 @@ curve is in `src/config/difficulty.ts`.
 ## Decision Log
 
 Newest first. Format: `YYYY-MM-DD — decision — rationale`.
+
+- **2026-05-29 — Enemy personality by ball count + skill-based scoring + mastery
+  stats.** Speed scales inversely with ball count (easy 2-number sums dart in,
+  hard 3+ lumber). Score = `BASE × ballCount × speed × difficulty × combo` so
+  fast, hard, late, streak play pays more. Persistent mastery (best combo, kills,
+  fastest solve) yields a rank on game over — progression feedback without
+  altering difficulty. (Drifter bonus enemy + handwriting still to come.)
+
+- **2026-05-29 — Keep only slow-mo recovery; refactor Alien for personalities.**
+  Slow-mo was the chosen recovery feel, so the pushback/clear/slowmo_push modes
+  and the M toggle were removed. `Alien` now takes an `AlienConfig` object and a
+  `behavior` field (`descend` today) with a `ballCount` getter, so enemy
+  personalities and new types can be added without reworking the scene.
 
 - **2026-05-29 — Locked target flees upward instead of freezing.** A correctly
   answered alien now turns and runs from the player (`RETREAT_SPEED`) rather than
