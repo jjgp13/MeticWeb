@@ -27,15 +27,16 @@ export default class BootScene extends Phaser.Scene {
     }
     for (let i = 10; i <= 13; i++) {
       this.load.spritesheet(`alien${i}`, `${base}/sprites/Alien${i}.png`, {
-        frameWidth: 16,
-        frameHeight: 40,
+        frameWidth: 32,
+        frameHeight: 20,
       });
     }
 
-    // --- Ship + bullet: 16x32, 2 frames -------------------------------------
+    // --- Ship + bullet ------------------------------------------------------
+    // Ship sheet is a 2x2 grid of 16x16 frames; we use a single static frame.
     this.load.spritesheet("ship", `${base}/sprites/SpaceShip.png`, {
       frameWidth: 16,
-      frameHeight: 32,
+      frameHeight: 16,
     });
     this.load.spritesheet("bullet", `${base}/sprites/bullet.png`, {
       frameWidth: 16,
@@ -72,30 +73,10 @@ export default class BootScene extends Phaser.Scene {
   }
 
   create(): void {
-    // Idle animations for each alien body.
-    for (let i = 1; i <= 13; i++) {
-      this.anims.create({
-        key: `alien${i}-idle`,
-        frames: this.anims.generateFrameNumbers(`alien${i}`, { start: 0, end: 1 }),
-        frameRate: 4,
-        repeat: -1,
-      });
-    }
-
-    this.anims.create({
-      key: "ship-thrust",
-      frames: this.anims.generateFrameNumbers("ship", { start: 0, end: 1 }),
-      frameRate: 10,
-      repeat: -1,
-    });
-
-    this.anims.create({
-      key: "bullet-fly",
-      frames: this.anims.generateFrameNumbers("bullet", { start: 0, end: 1 }),
-      frameRate: 12,
-      repeat: -1,
-    });
-
+    // Animations are deferred — we use static frames for now. The spritesheets
+    // are still sliced correctly so animations can be re-enabled later:
+    //   alien1-9: 16x16 (2 frames), alien10-13: 32x20 (2 frames),
+    //   ship: 16x16 (2x2 grid), bullet: 16x32 (2 frames).
     this.scene.start("GameScene");
   }
 }

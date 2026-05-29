@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { BULLET, ENEMY, GAME, PLAYER } from "../config/constants";
+import { difficultyAt } from "../config/difficulty";
 import Alien from "../objects/Alien";
 
 /**
@@ -27,8 +28,10 @@ export default class GameScene extends Phaser.Scene {
   private lastFire = 0;
   private gameOver = false;
 
-  private stars!: Phaser.GameObjects.TileSprite;
-  private spawnTimer!: Phaser.Time.TimerEvent;
+  private starSprites: Phaser.GameObjects.Image[] = [];
+  private elapsedMs = 0;
+  private spawnCountdown = 0;
+  private diffBar!: Phaser.GameObjects.Rectangle;
 
   constructor() {
     super("GameScene");
@@ -37,22 +40,30 @@ export default class GameScene extends Phaser.Scene {
   create(): void {
     this.resetState();
 
-    // --- Scrolling starfield background ------------------------------------
-    this.stars = this.add
-      .tileSprite(0, 0, GAME.WIDTH, GAME.HEIGHT, "star")
-      .setOrigin(0, 0)
-      .setAlpha(0.5)
-      .setTileScale(2);
+    // --- Sparse parallax starfield -----------------------------------------
+    // Individual faint stars at random depths read far better than tiling the
+    // star texture. Bigger stars drift faster, creating a parallax effect.
+    this.starSprites = [];
+    for (let i = 0; i < 70; i++) {
+      const s = this.add
+        .image(
+          Phaser.Math.Between(0, GAME.WIDTH),
+          Phaser.Math.Between(0, GAME.HEIGHT),
+          "star",
+        )
+        .setScale(Phaser.Math.FloatBetween(0.25, 0.85))
+        .setAlpha(Phaser.Math.FloatBetween(0.25, 0.8))
+        .setDepth(-1);
+      this.starSprites.push(s);
+    }
 
     // --- Groups -------------------------------------------------------------
     this.bullets = this.physics.add.group();
     this.aliens = this.physics.add.group();
 
     // --- Player ship --------------------------------------------------------
-    this.ship = this.physics.add
-      .sprite(GAME.WIDTH / 2, PLAYER.Y, "ship")
-      .play("ship-thrust");
-    this.ship.setScale(1.5);
+    this.ship = this.physics.add.sprite(GAME.WIDTH / 2, PLAYER.Y, "ship", 0);
+    this.ship.setScale(2);
 
     // Bullet hits alien -> explode + score.
     this.physics.add.overlap(
@@ -67,13 +78,8 @@ export default class GameScene extends Phaser.Scene {
     this.buildKeypad();
     this.bindKeyboard();
 
-    // --- Enemy spawner ------------------------------------------------------
-    this.spawnTimer = this.time.addEvent({
-      delay: ENEMY.SPAWN_INTERVAL,
-      loop: true,
-      callback: this.spawnAlien,
-      callbackScope: this,
-    });
+    // --- Enemy spawner: interval & speeds scale with difficulty (see update).
+    this.spawnCountdown = 0; // spawn immediately on the first frame
     this.spawnAlien();
   }
 
@@ -86,13 +92,33 @@ export default class GameScene extends Phaser.Scene {
     this.lifeIcons = [];
     this.lastSpawnX = -999;
     this.lastFire = 0;
+    this.elapsedMs = 0;
+    this.spawnCountdown = 0;
     this.gameOver = false;
   }
 
   update(time: number, delta: number): void {
     if (this.gameOver) return;
 
-    this.stars.tilePositionY -= 0.5; // drift the background downward
+    this.elapsedMs += delta;
+    const diff = difficultyAt(this.elapsedMs);
+
+    // Drift stars downward with parallax; wrap back to the top.
+    for (const s of this.starSprites) {
+      s.y += (0.15 + s.scaleX * 0.9) * (delta / 16.67);
+      if (s.y > GAME.HEIGHT) {
+        s.y = 0;
+        s.x = Phaser.Math.Between(0, GAME.WIDTH);
+      }
+    }
+    this.diffBar.setSize(diff.d * (GAME.WIDTH - 24), 4); // show ramp progress
+
+    // Spawn on a difficulty-scaled interval (faster over time).
+    this.spawnCountdown -= delta;
+    if (this.spawnCountdown <= 0) {
+      this.spawnAlien();
+      this.spawnCountdown = diff.spawnInterval;
+    }
 
     // Resolve the current target from the typed number.
     const typedVal = this.typed === "" ? -1 : parseInt(this.typed, 10);
@@ -129,12 +155,17 @@ export default class GameScene extends Phaser.Scene {
   private spawnAlien(): void {
     if (this.gameOver) return;
 
+    const diff = difficultyAt(this.elapsedMs);
+
     // Build a unique result so each typed number maps to exactly one alien.
+    // Ball count and digit size both scale with difficulty.
     let digits: number[] = [];
     let result = -1;
     for (let attempt = 0; attempt < 8; attempt++) {
-      const count = Phaser.Math.Between(ENEMY.MIN_BALLS, ENEMY.MAX_BALLS);
-      digits = Array.from({ length: count }, () => Phaser.Math.Between(1, 9));
+      const count = Phaser.Math.Between(1, diff.maxBalls);
+      digits = Array.from({ length: count }, () =>
+        Phaser.Math.Between(1, diff.maxDigit),
+      );
       result = digits.reduce((s, d) => s + d, 0);
       if (!this.enemiesInField.has(result)) break;
       result = -1;
@@ -150,7 +181,17 @@ export default class GameScene extends Phaser.Scene {
     this.lastSpawnX = x;
 
     const bodyKey = `alien${Phaser.Math.Between(1, 13)}`;
-    const alien = new Alien(this, x, -20, bodyKey, result, digits, "blueBalls");
+    const alien = new Alien(
+      this,
+      x,
+      -20,
+      bodyKey,
+      result,
+      digits,
+      "blueBalls",
+      diff.fallSpeed,
+      diff.homeSpeed,
+    );
     alien.setScale(1.5);
     this.aliens.add(alien);
     this.enemiesInField.set(result, alien);
@@ -166,7 +207,7 @@ export default class GameScene extends Phaser.Scene {
       this.ship.y - 24,
       "bullet",
     ) as Phaser.Physics.Arcade.Sprite;
-    bullet.play("bullet-fly");
+    bullet.setFrame(0); // static frame for now
     bullet.setVelocityY(-BULLET.SPEED);
     this.sound.play("shoot", { volume: 0.4 });
     // Clear the typed answer once we have committed to a shot.
@@ -242,6 +283,14 @@ export default class GameScene extends Phaser.Scene {
       fontSize: "20px",
       color: "#ffffff",
     });
+
+    // Difficulty ramp indicator: a thin bar that fills as the game speeds up.
+    this.add
+      .rectangle(12, 44, GAME.WIDTH - 24, 4, 0x1b2340)
+      .setOrigin(0, 0.5);
+    this.diffBar = this.add
+      .rectangle(12, 44, 0, 4, 0x4ea1ff)
+      .setOrigin(0, 0.5);
 
     for (let i = 0; i < PLAYER.LIVES; i++) {
       const icon = this.add
@@ -321,7 +370,6 @@ export default class GameScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
   private endGame(): void {
     this.gameOver = true;
-    this.spawnTimer.remove();
 
     const best = Math.max(this.score, Number(localStorage.getItem("metic-highscore") ?? 0));
     localStorage.setItem("metic-highscore", String(best));

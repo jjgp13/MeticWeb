@@ -15,6 +15,8 @@ export default class Alien extends Phaser.Physics.Arcade.Sprite {
   public readonly result: number;
   private balls: Phaser.GameObjects.Sprite[] = [];
   private homing = false;
+  private fallSpeed: number;
+  private homeSpeed: number;
 
   constructor(
     scene: Phaser.Scene,
@@ -24,15 +26,19 @@ export default class Alien extends Phaser.Physics.Arcade.Sprite {
     result: number,
     digits: number[],
     ballTexture: string,
+    fallSpeed: number,
+    homeSpeed: number,
   ) {
     super(scene, x, y, bodyKey);
     this.result = result;
+    this.fallSpeed = fallSpeed;
+    this.homeSpeed = homeSpeed;
 
     scene.add.existing(this);
     scene.physics.add.existing(this);
 
     this.setData("type", "alien");
-    this.play(`${bodyKey}-idle`);
+    this.setFrame(0); // static frame for now; animations come later
 
     // Lay the number balls out in a row centered above the alien body.
     const spacing = 16;
@@ -52,14 +58,14 @@ export default class Alien extends Phaser.Physics.Arcade.Sprite {
   public advance(playerX: number, delta: number): void {
     const dt = delta / 1000;
     if (this.y < ENEMY.HOME_TRIGGER_Y && !this.homing) {
-      this.y += ENEMY.FALL_SPEED * dt;
+      this.y += this.fallSpeed * dt;
     } else {
       this.homing = true;
       const dx = playerX - this.x;
       const dy = 1; // always drift down a touch while homing
       const len = Math.hypot(dx, dy) || 1;
-      this.x += (dx / len) * ENEMY.HOME_SPEED * dt;
-      this.y += (dy / len) * ENEMY.HOME_SPEED * dt;
+      this.x += (dx / len) * this.homeSpeed * dt;
+      this.y += (dy / len) * this.homeSpeed * dt;
     }
     // Keep balls glued above the body.
     const spacing = 16;
