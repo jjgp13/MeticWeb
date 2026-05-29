@@ -21,8 +21,8 @@ export const BULLET = {
 } as const;
 
 export const ENEMY = {
-  HOME_TRIGGER_Y: 120, // y after which an alien starts homing
-  MIN_SPAWN_GAP: 64, // px min horizontal distance between consecutive spawns
+  HOME_TRIGGER_Y: 220, // y after which an alien speeds up toward the player
+  MIN_SPAWN_GAP: 84, // px min horizontal distance between alien lanes
   BASE_POINTS: 50, // base score per ball
 } as const;
 
@@ -52,8 +52,9 @@ export const DIFFICULTY = {
   // ms between spawns (easy = slow/sparse, hard = fast/dense).
   SPAWN_INTERVAL: { easy: 2200, hard: 650 },
 
-  // Equation difficulty: how many number balls and how large each digit can be.
-  MAX_BALLS: { easy: 1, hard: 3 },
+  // A sum needs at least two numbers, so always >= 2 balls.
+  MIN_BALLS: 2,
+  MAX_BALLS: { easy: 2, hard: 3 },
   MAX_DIGIT: { easy: 3, hard: 9 },
 } as const;
 

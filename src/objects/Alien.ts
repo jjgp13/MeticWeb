@@ -14,7 +14,6 @@ export default class Alien extends Phaser.Physics.Arcade.Sprite {
   /** The number the player must type to target this alien. */
   public readonly result: number;
   private balls: Phaser.GameObjects.Sprite[] = [];
-  private homing = false;
   private fallSpeed: number;
   private homeSpeed: number;
 
@@ -54,19 +53,16 @@ export default class Alien extends Phaser.Physics.Arcade.Sprite {
     });
   }
 
-  /** Move down, then home toward the player's x once low enough. */
-  public advance(playerX: number, delta: number): void {
+  /**
+   * Fall straight down in a fixed lane (no horizontal movement) so aliens never
+   * converge and overlap. Speed ramps up from fallSpeed to homeSpeed once the
+   * alien crosses HOME_TRIGGER_Y, adding urgency as it nears the player.
+   */
+  public advance(delta: number): void {
     const dt = delta / 1000;
-    if (this.y < ENEMY.HOME_TRIGGER_Y && !this.homing) {
-      this.y += this.fallSpeed * dt;
-    } else {
-      this.homing = true;
-      const dx = playerX - this.x;
-      const dy = 1; // always drift down a touch while homing
-      const len = Math.hypot(dx, dy) || 1;
-      this.x += (dx / len) * this.homeSpeed * dt;
-      this.y += (dy / len) * this.homeSpeed * dt;
-    }
+    const speed = this.y < ENEMY.HOME_TRIGGER_Y ? this.fallSpeed : this.homeSpeed;
+    this.y += speed * dt;
+
     // Keep balls glued above the body.
     const spacing = 16;
     const totalW = (this.balls.length - 1) * spacing;

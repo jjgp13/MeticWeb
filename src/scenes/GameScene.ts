@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { BULLET, ENEMY, GAME, PLAYER } from "../config/constants";
+import { BULLET, DIFFICULTY, ENEMY, GAME, PLAYER } from "../config/constants";
 import { difficultyAt } from "../config/difficulty";
 import Alien from "../objects/Alien";
 
@@ -127,7 +127,7 @@ export default class GameScene extends Phaser.Scene {
     // Advance every alien; detect ones that reached the player line.
     this.aliens.getChildren().forEach((obj) => {
       const alien = obj as Alien;
-      alien.advance(this.ship.x, delta);
+      alien.advance(delta);
       if (alien.y >= PLAYER.Y - 6) this.onAlienReachedPlayer(alien);
     });
 
@@ -158,11 +158,11 @@ export default class GameScene extends Phaser.Scene {
     const diff = difficultyAt(this.elapsedMs);
 
     // Build a unique result so each typed number maps to exactly one alien.
-    // Ball count and digit size both scale with difficulty.
+    // Ball count (>= 2, so it is always a real sum) and digit size scale up.
     let digits: number[] = [];
     let result = -1;
     for (let attempt = 0; attempt < 8; attempt++) {
-      const count = Phaser.Math.Between(1, diff.maxBalls);
+      const count = Phaser.Math.Between(DIFFICULTY.MIN_BALLS, diff.maxBalls);
       digits = Array.from({ length: count }, () =>
         Phaser.Math.Between(1, diff.maxDigit),
       );
@@ -172,12 +172,22 @@ export default class GameScene extends Phaser.Scene {
     }
     if (result === -1) return; // field saturated, skip this tick
 
-    // Pick a spawn x that is not too close to the previous one.
+    // Pick a lane x that keeps clear of the last spawn AND any alien still near
+    // the top, so aliens (and their numbers) never overlap on screen.
+    const overlaps = (cx: number) =>
+      this.aliens.getChildren().some((o) => {
+        const a = o as Alien;
+        return a.y < 110 && Math.abs(a.x - cx) < ENEMY.MIN_SPAWN_GAP;
+      });
     let x = Phaser.Math.Between(40, GAME.WIDTH - 40);
     let guard = 0;
-    while (Math.abs(x - this.lastSpawnX) < ENEMY.MIN_SPAWN_GAP && guard++ < 8) {
+    while (
+      (Math.abs(x - this.lastSpawnX) < ENEMY.MIN_SPAWN_GAP || overlaps(x)) &&
+      guard++ < 12
+    ) {
       x = Phaser.Math.Between(40, GAME.WIDTH - 40);
     }
+    if (overlaps(x)) return; // no clear lane right now — skip to avoid overlap
     this.lastSpawnX = x;
 
     const bodyKey = `alien${Phaser.Math.Between(1, 13)}`;
@@ -278,24 +288,31 @@ export default class GameScene extends Phaser.Scene {
   }
 
   private buildHud(): void {
-    this.scoreText = this.add.text(12, 12, "0000000", {
-      fontFamily: "monospace",
-      fontSize: "20px",
-      color: "#ffffff",
-    });
+    // HUD sits above gameplay so aliens entering from the top never obscure it.
+    const HUD_DEPTH = 5;
+    this.scoreText = this.add
+      .text(12, 12, "0000000", {
+        fontFamily: "monospace",
+        fontSize: "20px",
+        color: "#ffffff",
+      })
+      .setDepth(HUD_DEPTH);
 
     // Difficulty ramp indicator: a thin bar that fills as the game speeds up.
     this.add
       .rectangle(12, 44, GAME.WIDTH - 24, 4, 0x1b2340)
-      .setOrigin(0, 0.5);
+      .setOrigin(0, 0.5)
+      .setDepth(HUD_DEPTH);
     this.diffBar = this.add
       .rectangle(12, 44, 0, 4, 0x4ea1ff)
-      .setOrigin(0, 0.5);
+      .setOrigin(0, 0.5)
+      .setDepth(HUD_DEPTH);
 
     for (let i = 0; i < PLAYER.LIVES; i++) {
       const icon = this.add
         .image(GAME.WIDTH - 18 - i * 26, 22, "life")
-        .setScale(1.4);
+        .setScale(1.4)
+        .setDepth(HUD_DEPTH);
       this.lifeIcons.push(icon);
     }
 
@@ -305,7 +322,8 @@ export default class GameScene extends Phaser.Scene {
         fontSize: "32px",
         color: "#4ea1ff",
       })
-      .setOrigin(0.5);
+      .setOrigin(0.5)
+      .setDepth(HUD_DEPTH);
   }
 
   // ---------------------------------------------------------------------------
