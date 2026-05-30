@@ -29,6 +29,18 @@ export const ENEMY = {
   // A 2-number sum is quick to solve, so those aliens dart in faster; 3+ numbers
   // are harder, so they lumber. Keyed by ball count (falls back to 1).
   SPEED_BY_BALLS: { 2: 1.25, 3: 0.85, 4: 0.6 } as Record<number, number>,
+
+  // Spawn pacing is gated by the board's CURRENT cognitive load, not a blind
+  // clock. Each alien contributes its THREAT_BY_BALLS weight; new spawns are
+  // withheld while the live total is at/above the difficulty-scaled budget, so
+  // the screen never floods and a hit stays recoverable.
+  THREAT_BY_BALLS: { 2: 1, 3: 2, 4: 3 } as Record<number, number>,
+  // Aliens carrying this many balls (or more) are "hard" — slow, multi-number
+  // sums. Their concurrent count is capped so two never appear at once early on.
+  HARD_BALL_THRESHOLD: 3,
+  // While the board is at its threat ceiling, recheck this often (ms) instead of
+  // waiting a full spawn interval, so deferred spawns don't pile up and burst.
+  SPAWN_RETRY_MS: 350,
 } as const;
 
 /**
@@ -100,8 +112,19 @@ export const DIFFICULTY = {
   SPAWN_INTERVAL: { easy: 2200, hard: 650 },
 
   // Hard cap on aliens alive at once, so the field never gets so crowded that a
-  // single hit becomes unrecoverable.
+  // single hit becomes unrecoverable. This is an absolute safety net; the threat
+  // budget below is the primary pacing gate and usually binds first.
   MAX_ON_SCREEN: { easy: 4, hard: 8 },
+
+  // Weighted cognitive-load ceiling on screen (see ENEMY.THREAT_BY_BALLS). New
+  // spawns are held while live threat is at/above this, keeping mental load
+  // bounded. Already-answered (locked, fleeing) aliens don't count.
+  THREAT_BUDGET: { easy: 3, hard: 8 },
+
+  // Difficulty at which a SECOND concurrent "hard" (multi-number) enemy is
+  // allowed. Below this only one hard enemy can be on screen, so the player
+  // never juggles two slow multi-number sums until very late game.
+  SECOND_HARD_AT: 0.85,
 
   // A sum needs at least two numbers, so always >= 2 balls.
   MIN_BALLS: 2,

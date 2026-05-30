@@ -9,6 +9,10 @@ export interface DifficultyParams {
   maxBalls: number;
   maxDigit: number;
   maxOnScreen: number;
+  /** Weighted cognitive-load ceiling on screen; spawns wait above it. */
+  threatBudget: number;
+  /** Max concurrent "hard" (multi-number) aliens allowed right now. */
+  maxHardOnScreen: number;
 }
 
 type Range = { easy: number; hard: number };
@@ -32,5 +36,8 @@ export function difficultyAt(elapsedMs: number): DifficultyParams {
     maxBalls: Math.round(lerp(DIFFICULTY.MAX_BALLS)),
     maxDigit: Math.round(lerp(DIFFICULTY.MAX_DIGIT)),
     maxOnScreen: Math.round(lerp(DIFFICULTY.MAX_ON_SCREEN)),
+    threatBudget: lerp(DIFFICULTY.THREAT_BUDGET),
+    // Stay at a single hard enemy until late game, then allow a second.
+    maxHardOnScreen: d < DIFFICULTY.SECOND_HARD_AT ? 1 : 2,
   };
 }

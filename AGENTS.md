@@ -95,10 +95,24 @@ Green=multiplication, Yellow=division.
   auto-fires when lined up (`PLAYER.SHOOT_RANGE`, `FIRE_COOLDOWN`). The **active
   target flees upward** while locked (`ENEMY.RETREAT_SPEED`): once its answer is
   typed it runs from the player and cannot cost a life, so a correct answer is
-  never punished by the ship's travel time. If a fleeing target is at/below the
-  muzzle the shot resolves point-blank.
-- Field is capped at `maxOnScreen` aliens (difficulty-scaled, 4→8); spawns are
-  skipped when full so the screen can't over-populate into an unrecoverable hit.
+  never punished by the ship's travel time. The target stays **locked
+  (`lockedTarget`) until a bullet destroys it** — independent of the typed
+  string — so a committed kill keeps fleeing instead of turning back. If a
+  fleeing target is at/below the muzzle the shot resolves point-blank.
+- **Spawn pacing is board-state-aware, not a blind clock.** Each alien has a
+  cognitive-load weight (`ENEMY.THREAT_BY_BALLS`: 2-ball=1, 3-ball=2, 4-ball=3);
+  new spawns are withheld while the live total is at/above the difficulty-scaled
+  `threatBudget` (3→8), rechecking every `ENEMY.SPAWN_RETRY_MS` (350ms) so the
+  screen never floods and a hit stays recoverable. Already-answered (locked,
+  fleeing) aliens don't count toward the budget.
+- **Concurrent "hard" enemies are capped.** Aliens with
+  `≥ ENEMY.HARD_BALL_THRESHOLD` (3) balls are slow multi-number sums; only one
+  may be on screen until late game (`DIFFICULTY.SECOND_HARD_AT` = d≥0.85, then
+  two), so the player never juggles two multi-number sums at once. When the cap
+  is hit the spawn is forced to an easy 2-ball enemy.
+- Field is also capped at `maxOnScreen` aliens (difficulty-scaled, 4→8) as an
+  absolute safety net; the threat budget is the primary gate and usually binds
+  first. Spawns are skipped when no clear lane exists.
 - Input: on-screen keypad **and** physical keyboard (0–9, Backspace, Esc).
   Max 2 typed digits.
 - HUD (score, lives, difficulty bar, typed display) draws above gameplay
@@ -168,6 +182,16 @@ curve is in `src/config/difficulty.ts`.
 ## Decision Log
 
 Newest first. Format: `YYYY-MM-DD — decision — rationale`.
+
+- **2026-05-29 — Board-aware spawn pacing + hard-enemy cap.** Spawns are gated by
+  a weighted cognitive-load budget (`THREAT_BY_BALLS`/`threatBudget`) instead of a
+  blind timer, and at most one multi-number "hard" enemy appears until late game
+  (`SECOND_HARD_AT`). Fixes difficulty spikes/flooding once 2- and 3-number
+  enemies mixed; load now stays bounded and recoverable.
+- **2026-05-29 — Lock the fired target until destroyed.** Clearing the typed
+  answer on fire used to drop the target, so a committed alien stopped fleeing
+  and advanced again mid-flight. A persistent `lockedTarget` keeps it retreating
+  until the bullet actually hits it.
 
 - **2026-05-29 — Enemy personality by ball count + skill-based scoring + mastery
   stats.** Speed scales inversely with ball count (easy 2-number sums dart in,

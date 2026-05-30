@@ -27,6 +27,9 @@ export default class GameScene extends Phaser.Scene {
   /** result -> alien, so a typed number maps directly to its target. */
   private enemiesInField = new Map<number, Alien>();
   private target: Alien | null = null;
+  /** Once we fire on a target it stays locked (and fleeing) until destroyed,
+   * independent of the typed string, so a committed kill never turns back. */
+  private lockedTarget: Alien | null = null;
 
   private typed = "";
   private typedText!: Phaser.GameObjects.Text;
@@ -111,6 +114,7 @@ export default class GameScene extends Phaser.Scene {
   private resetState(): void {
     this.enemiesInField.clear();
     this.target = null;
+    this.lockedTarget = null;
     this.typed = "";
     this.score = 0;
     this.lives = PLAYER.LIVES;
@@ -150,16 +154,29 @@ export default class GameScene extends Phaser.Scene {
     }
     this.diffBar.setSize(diff.d * (GAME.WIDTH - 24), 4); // show ramp progress
 
-    // Spawn on a difficulty-scaled interval (faster over time).
+    // Spawn pacing is gated by the board's current cognitive load, not a blind
+    // clock: hold off while the screen is at its threat ceiling so it never
+    // floods and a hit stays recoverable. Recheck soon instead of waiting a full
+    // interval, so deferred spawns don't pile up and burst once one clears.
     this.spawnCountdown -= fieldDelta;
     if (this.spawnCountdown <= 0) {
-      this.spawnAlien();
-      this.spawnCountdown = diff.spawnInterval;
+      if (this.currentThreat() < diff.threatBudget) {
+        this.spawnAlien();
+        this.spawnCountdown = diff.spawnInterval;
+      } else {
+        this.spawnCountdown = ENEMY.SPAWN_RETRY_MS;
+      }
     }
 
-    // Resolve the current target from the typed number.
-    const typedVal = this.typed === "" ? -1 : parseInt(this.typed, 10);
-    this.target = this.enemiesInField.get(typedVal) ?? null;
+    // Resolve the current target. A locked target (already fired upon) stays
+    // committed until it is destroyed; otherwise the typed number picks one.
+    if (this.lockedTarget && this.lockedTarget.active) {
+      this.target = this.lockedTarget;
+    } else {
+      this.lockedTarget = null;
+      const typedVal = this.typed === "" ? -1 : parseInt(this.typed, 10);
+      this.target = this.enemiesInField.get(typedVal) ?? null;
+    }
 
     // Advance every alien; detect ones that reached the player line. The active
     // target FLEES upward: once the player has typed its answer it turns and
@@ -196,6 +213,32 @@ export default class GameScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
   // Spawning
   // ---------------------------------------------------------------------------
+  /**
+   * Weighted cognitive load currently on screen. Already-answered (locked,
+   * fleeing) aliens are excluded: they are committed kills, no longer a mental
+   * burden, so they shouldn't suppress new spawns.
+   */
+  private currentThreat(): number {
+    let threat = 0;
+    this.aliens.getChildren().forEach((o) => {
+      const a = o as Alien;
+      if (a === this.lockedTarget) return;
+      threat += ENEMY.THREAT_BY_BALLS[a.ballCount] ?? 1;
+    });
+    return threat;
+  }
+
+  /** Count of live "hard" (multi-number) aliens, excluding the locked target. */
+  private hardAliensOnScreen(): number {
+    let n = 0;
+    this.aliens.getChildren().forEach((o) => {
+      const a = o as Alien;
+      if (a === this.lockedTarget) return;
+      if (a.ballCount >= ENEMY.HARD_BALL_THRESHOLD) n++;
+    });
+    return n;
+  }
+
   private spawnAlien(): void {
     if (this.gameOver) return;
 
@@ -206,11 +249,17 @@ export default class GameScene extends Phaser.Scene {
     if (this.aliens.getLength() >= diff.maxOnScreen) return;
 
     // Build a unique result so each typed number maps to exactly one alien.
-    // Ball count (>= 2, so it is always a real sum) and digit size scale up.
+    // Ball count (>= 2, so it is always a real sum) and digit size scale up, but
+    // cap concurrent "hard" (multi-number) enemies so the player never has to
+    // juggle two slow multi-number sums at once.
+    const maxBallsAllowed =
+      this.hardAliensOnScreen() >= diff.maxHardOnScreen
+        ? Math.max(DIFFICULTY.MIN_BALLS, ENEMY.HARD_BALL_THRESHOLD - 1)
+        : diff.maxBalls;
     let digits: number[] = [];
     let result = -1;
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const count = Phaser.Math.Between(DIFFICULTY.MIN_BALLS, diff.maxBalls);
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const count = Phaser.Math.Between(DIFFICULTY.MIN_BALLS, maxBallsAllowed);
       digits = Array.from({ length: count }, () =>
         Phaser.Math.Between(1, diff.maxDigit),
       );
@@ -269,8 +318,10 @@ export default class GameScene extends Phaser.Scene {
     bullet.setFrame(0); // static frame for now
     bullet.setVelocityY(-BULLET.SPEED);
     this.sound.play("shoot", { volume: 0.4 });
-    // Clear the typed answer once we have committed to a shot.
+    // Clear the typed answer once we have committed to a shot, but keep the
+    // target LOCKED so it keeps fleeing until a bullet actually destroys it.
     this.setTyped("");
+    if (target && target.active) this.lockedTarget = target;
 
     // If the locked target sits at/below the muzzle, an upward bullet can't
     // reach it, so resolve the hit point-blank to guarantee the kill.
@@ -297,6 +348,7 @@ export default class GameScene extends Phaser.Scene {
     this.addScore(points, alien.x, alien.y);
 
     this.enemiesInField.delete(alien.result);
+    if (this.lockedTarget === alien) this.lockedTarget = null;
     alien.kill();
     bullet.destroy();
   }
