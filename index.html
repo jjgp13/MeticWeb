@@ -4,8 +4,12 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
+    <meta name="theme-color" content="#05060f" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Metic</title>
     <style>
       html,
@@ -15,6 +19,12 @@
         height: 100%;
         background: #05060f;
         overflow: hidden;
+        /* Stop the browser from hijacking touches as scroll/zoom gestures. */
+        touch-action: none;
+        overscroll-behavior: none;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
       }
       #game {
         width: 100%;
@@ -22,6 +32,10 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        /* Keep gameplay clear of notches / rounded corners. */
+        padding: env(safe-area-inset-top) env(safe-area-inset-right)
+          env(safe-area-inset-bottom) env(safe-area-inset-left);
+        box-sizing: border-box;
       }
     </style>
   </head>

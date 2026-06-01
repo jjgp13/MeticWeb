@@ -11,6 +11,7 @@ import {
   STORAGE,
 } from "../config/constants";
 import { difficultyAt } from "../config/difficulty";
+import { isLeaderboardEnabled } from "../services/leaderboard";
 import Alien from "../objects/Alien";
 
 /**
@@ -47,6 +48,10 @@ export default class GameScene extends Phaser.Scene {
   private lastSpawnX = -999;
   private lastFire = 0;
   private gameOver = false;
+  /** Guards the single transition out of the game-over screen. */
+  private proceeding = false;
+  /** Whether this run beat the stored personal best (drives name-entry copy). */
+  private newHighScore = false;
 
   private starSprites: Phaser.GameObjects.Image[] = [];
   private elapsedMs = 0;
@@ -128,6 +133,8 @@ export default class GameScene extends Phaser.Scene {
     this.elapsedMs = 0;
     this.spawnCountdown = 0;
     this.gameOver = false;
+    this.proceeding = false;
+    this.newHighScore = false;
     this.recoveryUntil = 0;
     this.paused = false;
     this.pauseOverlay = [];
@@ -565,13 +572,13 @@ export default class GameScene extends Phaser.Scene {
       if (e.key >= "0" && e.key <= "9") this.handleInput(e.key);
       else if (e.key === "Backspace") this.handleInput("<");
       else if (e.key === "Escape") this.handleInput("C");
-      else if (e.key === "Enter" && this.gameOver) this.scene.restart();
+      else if (e.key === "Enter" && this.gameOver) this.proceedAfterGameOver();
     });
   }
 
   private handleInput(key: string): void {
     if (this.gameOver) {
-      this.scene.restart();
+      this.proceedAfterGameOver();
       return;
     }
     if (this.paused) return;
@@ -594,7 +601,9 @@ export default class GameScene extends Phaser.Scene {
 
     // Merge this run into the persistent mastery stats.
     const num = (k: string) => Number(localStorage.getItem(k) ?? 0);
-    const best = Math.max(this.score, num(STORAGE.HIGHSCORE));
+    const priorHigh = num(STORAGE.HIGHSCORE);
+    this.newHighScore = this.score > 0 && this.score >= priorHigh;
+    const best = Math.max(this.score, priorHigh);
     const bestCombo = Math.max(this.bestComboThisRun, num(STORAGE.BEST_COMBO));
     const totalKills = num(STORAGE.TOTAL_KILLS) + this.killsThisRun;
     const priorFastest = num(STORAGE.FASTEST_MS); // 0 = none recorded yet
@@ -643,8 +652,11 @@ export default class GameScene extends Phaser.Scene {
       )
       .setOrigin(0.5)
       .setDepth(11);
+    const continueText = isLeaderboardEnabled()
+      ? "tap / Enter to enter initials"
+      : "tap / Enter to play again";
     this.add
-      .text(GAME.WIDTH / 2, GAME.HEIGHT / 2 + 80, "tap / Enter to play again", {
+      .text(GAME.WIDTH / 2, GAME.HEIGHT / 2 + 80, continueText, {
         fontFamily: "monospace",
         fontSize: "16px",
         color: "#4ea1ff",
@@ -652,6 +664,20 @@ export default class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(11);
 
-    this.input.once("pointerdown", () => this.scene.restart());
+    this.input.once("pointerdown", () => this.proceedAfterGameOver());
+  }
+
+  /** Single, idempotent exit from game-over: leaderboard flow or plain restart. */
+  private proceedAfterGameOver(): void {
+    if (this.proceeding) return;
+    this.proceeding = true;
+    if (isLeaderboardEnabled()) {
+      this.scene.start("NameEntryScene", {
+        score: this.score,
+        personalBest: this.newHighScore,
+      });
+    } else {
+      this.scene.restart();
+    }
   }
 }

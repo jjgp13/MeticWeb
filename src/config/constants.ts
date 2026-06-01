@@ -83,6 +83,16 @@ export const STORAGE = {
   BEST_COMBO: "metic-best-combo",
   TOTAL_KILLS: "metic-total-kills",
   FASTEST_MS: "metic-fastest-ms",
+  LAST_NAME: "metic-last-name", // remembers the player's last arcade initials
+} as const;
+
+/** Arcade global leaderboard (Supabase-backed). */
+export const LEADERBOARD = {
+  NAME_LEN: 5, // arcade initials length
+  // Characters selectable per initials slot, in cycle order.
+  CHARSET: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split(""),
+  TOP_N: 20, // rows fetched/shown on the leaderboard screen
+  MAX_SCORE: 1000000, // must match the Supabase score_range CHECK constraint
 } as const;
 
 /**

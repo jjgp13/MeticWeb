@@ -49,11 +49,40 @@ src/
   scenes/
     BootScene.ts      Preloads assets; defers animations (static frames for now)
     GameScene.ts      The core loop: spawn, input, targeting, combat, HUD
+    NameEntryScene.ts Arcade 5-char initials entry shown at game over
+    LeaderboardScene.ts Global top-N board + the player's world rank
+  services/
+    leaderboard.ts    Supabase-backed global high scores (submit/getTop/getRank)
   objects/
     Alien.ts          Alien body + number balls; movement driven by `behavior`.
                       Constructed from a single `AlienConfig` object so new
                       per-personality fields (speed, behavior, color) slot in.
+  env.d.ts            Types for Vite `import.meta.env` (Supabase env vars)
 ```
+
+### Global leaderboard & publishing
+
+- **Backend: Supabase** (hosted Postgres). The browser uses `supabase-js`
+  directly with the **anon public key** (safe — Row-Level Security + CHECK
+  constraints guard the `scores` table). No server to host.
+- `scores(id, name char(5), score int 0..1_000_000, created_at)`; RLS allows
+  anon `SELECT` of all rows and anon `INSERT` only when `name ~ '^[A-Z0-9]{1,5}$'`
+  and score is in range. `get_rank(s int)` RPC = `count(*)+1 WHERE score > s`
+  (competition ranking; ties share a rank).
+- Credentials come from Vite env: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+  (baked in at build, public by design). `isLeaderboardEnabled()` is true only
+  when both are present, so the game **builds and runs locally without them** —
+  game over just restarts instead of routing to name entry.
+- Game-over flow (when enabled): GAME OVER overlay → `NameEntryScene` →
+  `submitScore` → `LeaderboardScene` → restart `GameScene`. All three restart
+  triggers route through one idempotent `proceedAfterGameOver()`.
+- **Hosting: GitHub Pages** via `.github/workflows/deploy.yml` (build on push to
+  `main`, deploy `dist`). Supabase env injected from repo **secrets**. Vite
+  `base: "./"` keeps asset paths relative so the project subpath works.
+- **Mobile:** Phaser `Scale.FIT`+`CENTER_BOTH` (portrait), pointer-based keypad,
+  and `index.html` hardening (`viewport-fit=cover` + safe-area insets,
+  `touch-action:none`, `overscroll-behavior:none`, no text selection).
+
 
 ### How assets are imported
 
@@ -167,8 +196,11 @@ curve is in `src/config/difficulty.ts`.
        the typed number (alongside the keypad).
 9. [ ] Other operations (subtraction/multiplication/division) via color-coded balls
 10. [ ] Sprite animations + richer explosion/background VFX
-11. [ ] Leaderboard backend (Supabase or Firebase) + world leaderboard
-12. [ ] PvP multiplayer (Colyseus / WebSockets)
+11. [x] Leaderboard backend (Supabase) + world leaderboard — 5-char initials at
+       game over, world rank, top-N board. **Needs Supabase creds + Pages setup.**
+12. [ ] Publish on GitHub Pages (workflow added; enable Pages = "GitHub Actions"
+       and add repo secrets `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`).
+13. [ ] PvP multiplayer (Colyseus / WebSockets)
 
 ## Conventions
 
@@ -183,6 +215,11 @@ curve is in `src/config/difficulty.ts`.
 
 Newest first. Format: `YYYY-MM-DD — decision — rationale`.
 
+- **2026-05-29 — Arcade global leaderboard on Supabase + GitHub Pages.** Game
+  over → 5-char initials entry → submit → world rank + top-N board. Browser uses
+  `supabase-js` with the public anon key (RLS + CHECK constraints protect the
+  `scores` table; score capped at 1,000,000). Frontend degrades gracefully when
+  creds are absent. Hosting via a Pages Action; `index.html` hardened for mobile.
 - **2026-05-29 — Board-aware spawn pacing + hard-enemy cap.** Spawns are gated by
   a weighted cognitive-load budget (`THREAT_BY_BALLS`/`threatBudget`) instead of a
   blind timer, and at most one multi-number "hard" enemy appears until late game
