@@ -77,6 +77,6 @@ export default class BootScene extends Phaser.Scene {
     // are still sliced correctly so animations can be re-enabled later:
     //   alien1-9: 16x16 (2 frames), alien10-13: 32x20 (2 frames),
     //   ship: 16x16 (2x2 grid), bullet: 16x32 (2 frames).
-    this.scene.start("GameScene");
+    this.scene.start("MenuScene");
   }
 }

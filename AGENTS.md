@@ -48,9 +48,11 @@ src/
     difficulty.ts     Logistic difficulty curve
   scenes/
     BootScene.ts      Preloads assets; defers animations (static frames for now)
+    MenuScene.ts      Title screen: PLAY / HOW TO PLAY / SCORES buttons
+    HowToPlayScene.ts Static rules screen reached from the menu
     GameScene.ts      The core loop: spawn, input, targeting, combat, HUD
     NameEntryScene.ts Arcade 5-char initials entry shown at game over
-    LeaderboardScene.ts Global top-N board + the player's world rank
+    LeaderboardScene.ts Global top-N board; dual-mode (post-run / menu browse)
   services/
     leaderboard.ts    Supabase-backed global high scores (submit/getTop/getRank)
   objects/
@@ -72,10 +74,15 @@ src/
 - Credentials come from Vite env: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
   (baked in at build, public by design). `isLeaderboardEnabled()` is true only
   when both are present, so the game **builds and runs locally without them** —
-  game over just restarts instead of routing to name entry.
+  game over just returns to the menu instead of routing to name entry.
+- **Navigation:** `BootScene` → `MenuScene` (PLAY / HOW TO PLAY / SCORES). PLAY →
+  `GameScene`; HOW TO PLAY → `HowToPlayScene`; SCORES → `LeaderboardScene` in
+  **browse** mode (fetches `getTop()` itself, BACK → menu).
 - Game-over flow (when enabled): GAME OVER overlay → `NameEntryScene` →
-  `submitScore` → `LeaderboardScene` → restart `GameScene`. All three restart
-  triggers route through one idempotent `proceedAfterGameOver()`.
+  `submitScore` → `LeaderboardScene` (post-run mode, shows world rank) →
+  `MenuScene`. All restart triggers route through one idempotent
+  `proceedAfterGameOver()`; when the leaderboard is disabled it goes straight to
+  `MenuScene`.
 - **Hosting: GitHub Pages** via `.github/workflows/deploy.yml` (build on push to
   `main`, deploy `dist`). Supabase env injected from repo **secrets**. Vite
   `base: "./"` keeps asset paths relative so the project subpath works.
@@ -221,6 +228,11 @@ curve is in `src/config/difficulty.ts` (`difficultyAt(elapsedMs, score)`).
 
 Newest first. Format: `YYYY-MM-DD — decision — rationale`.
 
+- **2026-06-02 — Main menu screen.** Boot now opens `MenuScene` (PLAY / HOW TO
+  PLAY / SCORES) instead of starting gameplay directly. `HowToPlayScene` explains
+  the rules; `LeaderboardScene` gained a **browse** mode (fetches the board for the
+  menu's SCORES button, BACK → menu). Game over now returns to the menu. Gives the
+  arcade a proper front-end and a place to read the rules and the world board.
 - **2026-06-02 — Score-led difficulty + "unsolved" spawn cap; double-bullet fix.**
   Difficulty is now `d = max(dScore, dTimeFloor)` (score earns difficulty; time
   is only a gentle floor). The primary spawn gate is the count of UNSOLVED aliens

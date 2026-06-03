@@ -722,7 +722,7 @@ export default class GameScene extends Phaser.Scene {
         personalBest: this.newHighScore,
       });
     } else {
-      this.scene.restart();
+      this.scene.start("MenuScene");
     }
   }
 }
