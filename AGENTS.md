@@ -54,7 +54,8 @@ src/
     NameEntryScene.ts Arcade 5-char initials entry shown at game over
     LeaderboardScene.ts Global top-N board; dual-mode (post-run / menu browse)
   services/
-    leaderboard.ts    Supabase-backed global high scores (submit/getTop/getRank)
+    leaderboard.ts    Supabase global high scores: startMatch + match-gated
+                      submitScore, plus getTop/getRank reads
   objects/
     Alien.ts          Alien body + number balls; movement driven by `behavior`.
                       Constructed from a single `AlienConfig` object so new
@@ -64,13 +65,29 @@ src/
 
 ### Global leaderboard & publishing
 
-- **Backend: Supabase** (hosted Postgres). The browser uses `supabase-js`
-  directly with the **anon public key** (safe — Row-Level Security + CHECK
-  constraints guard the `scores` table). No server to host.
-- `scores(id, name varchar(5), score int 0..1_000_000, created_at)`; RLS allows
-  anon `SELECT` of all rows and anon `INSERT` only when `name ~ '^[A-Z0-9]{1,5}$'`
-  and score is in range. `get_rank(s int)` RPC = `count(*)+1 WHERE score > s`
+- **Backend: Supabase** (hosted Postgres). Reads use `supabase-js` with the
+  **anon public key** (public by design — top scores/rank are world-readable).
+  No server to host.
+- `scores(id, name varchar(6), score int 0..1_000_000, created_at)`; RLS allows
+  anon `SELECT` of all rows. `name` is `^[A-Z0-9]{3,6}$` (the player picks 3–6
+  initials at game over). `get_rank(s int)` RPC = `count(*)+1 WHERE score > s`
   (competition ranking; ties share a rank).
+- **Score writes are server-gated (no anon INSERT).** Direct anon `INSERT` into
+  `scores` is revoked, so a forged REST insert with the public key can't write a
+  score. Two `SECURITY DEFINER` functions (anon-executable via RPC) are the only
+  write path — schema in `supabase/match-gate.sql`:
+  - `start_match()` → issues a single-use, server-timestamped `matches` row id;
+    called by `GameScene` (via `startMatch()`) when a run begins.
+  - `submit_run(p_match, p_name, p_score)` → in ONE transaction: atomically
+    consumes the match (rejects missing/used, age <2s or >4h), plausibility-checks
+    the score against elapsed time (cap `≈ elapsed·3000 + 5000`, far above real
+    play), inserts the score, and returns `{row_id, rank}`. A rejected/failed
+    submit rolls back, so a legit match is never burned.
+  - `matches` has RLS on with NO policies (only the definer functions touch it).
+  - **Honest limit:** this blocks devtools/REST forgery and bots that skip the
+    flow, but — like any client-scored game — can't stop a scripted
+    "start → wait → submit a plausible score". Per-IP rate limiting is not yet
+    implemented (RPC has no easy IP access).
 - Credentials come from Vite env: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
   (baked in at build, public by design). `isLeaderboardEnabled()` is true only
   when both are present, so the game **builds and runs locally without them** —
@@ -78,11 +95,11 @@ src/
 - **Navigation:** `BootScene` → `MenuScene` (PLAY / HOW TO PLAY / SCORES). PLAY →
   `GameScene`; HOW TO PLAY → `HowToPlayScene`; SCORES → `LeaderboardScene` in
   **browse** mode (fetches `getTop()` itself, BACK → menu).
-- Game-over flow (when enabled): GAME OVER overlay → `NameEntryScene` →
-  `submitScore` → `LeaderboardScene` (post-run mode, shows world rank) →
-  `MenuScene`. All restart triggers route through one idempotent
-  `proceedAfterGameOver()`; when the leaderboard is disabled it goes straight to
-  `MenuScene`.
+- Game-over flow (when enabled): GAME OVER overlay → `NameEntryScene` (3–6 char
+  length selector + initials) → `submitScore` (via the match gate) →
+  `LeaderboardScene` (post-run mode, shows world rank) → `MenuScene`. All restart
+  triggers route through one idempotent `proceedAfterGameOver()`; when the
+  leaderboard is disabled it goes straight to `MenuScene`.
 - **Hosting: GitHub Pages** via `.github/workflows/deploy.yml` (build on push to
   `main`, deploy `dist`). Supabase env injected from repo **secrets**. Vite
   `base: "./"` keeps asset paths relative so the project subpath works.
@@ -228,6 +245,17 @@ curve is in `src/config/difficulty.ts` (`difficultyAt(elapsedMs, score)`).
 
 Newest first. Format: `YYYY-MM-DD — decision — rationale`.
 
+- **2026-06-02 — Server-gated score submission + 3–6 char names.** Players now
+  choose 3–6 initials (DB `name` widened to `varchar(6)`, regex `{3,6}`). Score
+  writes are no longer a direct anon INSERT: anon INSERT on `scores` is revoked
+  and the only write path is two `SECURITY DEFINER` RPCs (`start_match` /
+  `submit_run`, in `supabase/match-gate.sql`). A run opens a single-use,
+  server-timestamped match at start; submission atomically consumes it,
+  plausibility-checks score vs elapsed time, and inserts — all in one
+  transaction. Chosen over Edge Functions (no service-role exposure, no CORS, no
+  deploy tooling) for the same enforcement. Blocks REST/devtools forgery and
+  flow-skipping bots; cannot stop a patient scripted "start→wait→submit" (no
+  client-scored game can). Rate limiting still TODO.
 - **2026-06-02 — Main menu screen.** Boot now opens `MenuScene` (PLAY / HOW TO
   PLAY / SCORES) instead of starting gameplay directly. `HowToPlayScene` explains
   the rules; `LeaderboardScene` gained a **browse** mode (fetches the board for the

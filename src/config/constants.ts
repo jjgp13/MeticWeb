@@ -84,11 +84,15 @@ export const STORAGE = {
   TOTAL_KILLS: "metic-total-kills",
   FASTEST_MS: "metic-fastest-ms",
   LAST_NAME: "metic-last-name", // remembers the player's last arcade initials
+  LAST_LEN: "metic-last-len", // remembers the chosen initials length
 } as const;
 
 /** Arcade global leaderboard (Supabase-backed). */
 export const LEADERBOARD = {
-  NAME_LEN: 5, // arcade initials length
+  // Players choose how many initials to register, from MIN to MAX.
+  NAME_LEN_MIN: 3,
+  NAME_LEN_MAX: 6,
+  NAME_LEN_DEFAULT: 5, // pre-selected length (classic arcade default)
   // Characters selectable per initials slot, in cycle order.
   CHARSET: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split(""),
   TOP_N: 20, // rows fetched/shown on the leaderboard screen

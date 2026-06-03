@@ -9,20 +9,28 @@ interface NameEntryData {
 }
 
 /**
- * Classic arcade initials entry: five slots the player sets to A–Z / 0–9 via
- * touch arrows, the on-screen keypad of letters, or the physical keyboard.
- * On confirm it submits to the global leaderboard and hands off to the board.
+ * Classic arcade initials entry. The player first picks how many initials to use
+ * (3–6) with a length selector, then sets each slot to A–Z / 0–9 via touch
+ * arrows, the on-screen keypad of letters, or the physical keyboard. On confirm
+ * it submits to the global leaderboard and hands off to the board.
  */
 export default class NameEntryScene extends Phaser.Scene {
   private score = 0;
   private personalBest = false;
 
+  /** Char index per slot, kept at NAME_LEN_MAX so values survive length changes. */
   private slotIdx: number[] = [];
+  private nameLen: number = LEADERBOARD.NAME_LEN_DEFAULT;
   private slotText: Phaser.GameObjects.Text[] = [];
+  private slotObjects: Phaser.GameObjects.GameObject[] = [];
   private current = 0;
   private highlight!: Phaser.GameObjects.Rectangle;
+  private lenLabel!: Phaser.GameObjects.Text;
   private submitting = false;
   private status!: Phaser.GameObjects.Text;
+
+  private readonly slotsRowY = 330;
+  private readonly slotSpacing = 64;
 
   constructor() {
     super("NameEntryScene");
@@ -32,7 +40,9 @@ export default class NameEntryScene extends Phaser.Scene {
     this.score = data.score ?? 0;
     this.personalBest = Boolean(data.personalBest);
     this.slotIdx = this.defaultInitials();
+    this.nameLen = this.defaultLength();
     this.slotText = [];
+    this.slotObjects = [];
     this.current = 0;
     this.submitting = false;
   }
@@ -64,17 +74,90 @@ export default class NameEntryScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    // Five initials slots with touch up/down arrows.
-    const spacing = 64;
-    const startX = cx - ((LEADERBOARD.NAME_LEN - 1) * spacing) / 2;
-    const rowY = 300;
+    this.buildLengthSelector(cx, 250);
 
+    // Highlight bar under the active slot; repositioned as slots rebuild.
     this.highlight = this.add
-      .rectangle(startX, rowY + 26, 44, 4, 0xffd166)
+      .rectangle(cx, this.slotsRowY + 26, 44, 4, 0xffd166)
+      .setOrigin(0.5)
+      .setDepth(1);
+
+    this.buildSlots();
+
+    // Confirm button.
+    const btn = this.add
+      .rectangle(cx, 430, 200, 48, 0x1b2340)
+      .setStrokeStyle(2, 0x4ea1ff)
+      .setInteractive({ useHandCursor: true });
+    this.add
+      .text(cx, 430, "CONFIRM", { fontFamily: "monospace", fontSize: "22px", color: "#ffd166" })
+      .setOrigin(0.5);
+    btn.on("pointerdown", () => this.confirm());
+
+    this.add
+      .text(cx, 500, "tap ▲▼ or type · ← → to move · Enter", {
+        fontFamily: "monospace",
+        fontSize: "13px",
+        color: "#8893b5",
+      })
       .setOrigin(0.5);
 
-    for (let i = 0; i < LEADERBOARD.NAME_LEN; i++) {
-      const x = startX + i * spacing;
+    this.status = this.add
+      .text(cx, 560, "", { fontFamily: "monospace", fontSize: "16px", color: "#ffd166" })
+      .setOrigin(0.5);
+
+    this.bindKeyboard();
+  }
+
+  // ---------------------------------------------------------------------------
+  private buildLengthSelector(cx: number, y: number): void {
+    const dec = this.add
+      .text(cx - 80, y, "◄", { fontFamily: "monospace", fontSize: "24px", color: "#4ea1ff" })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    dec.on("pointerdown", () => this.changeLength(-1));
+
+    this.lenLabel = this.add
+      .text(cx, y, `LENGTH: ${this.nameLen}`, {
+        fontFamily: "monospace",
+        fontSize: "18px",
+        color: "#ffffff",
+      })
+      .setOrigin(0.5);
+
+    const inc = this.add
+      .text(cx + 80, y, "►", { fontFamily: "monospace", fontSize: "24px", color: "#4ea1ff" })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    inc.on("pointerdown", () => this.changeLength(+1));
+  }
+
+  private changeLength(dir: number): void {
+    if (this.submitting) return;
+    const next = Phaser.Math.Clamp(
+      this.nameLen + dir,
+      LEADERBOARD.NAME_LEN_MIN,
+      LEADERBOARD.NAME_LEN_MAX,
+    );
+    if (next === this.nameLen) return;
+    this.nameLen = next;
+    this.lenLabel.setText(`LENGTH: ${this.nameLen}`);
+    if (this.current >= this.nameLen) this.current = this.nameLen - 1;
+    this.buildSlots();
+  }
+
+  /** (Re)build the initials slot row for the current length. */
+  private buildSlots(): void {
+    this.slotObjects.forEach((o) => o.destroy());
+    this.slotObjects = [];
+    this.slotText = [];
+
+    const cx = GAME.WIDTH / 2;
+    const startX = cx - ((this.nameLen - 1) * this.slotSpacing) / 2;
+    const rowY = this.slotsRowY;
+
+    for (let i = 0; i < this.nameLen; i++) {
+      const x = startX + i * this.slotSpacing;
 
       const up = this.add
         .text(x, rowY - 44, "▲", { fontFamily: "monospace", fontSize: "22px", color: "#4ea1ff" })
@@ -104,35 +187,13 @@ export default class NameEntryScene extends Phaser.Scene {
         this.selectSlot(i);
         this.cycle(i, -1);
       });
+
+      this.slotObjects.push(up, letter, down);
     }
-    this.selectSlot(0);
 
-    // Confirm button.
-    const btn = this.add
-      .rectangle(cx, 430, 200, 48, 0x1b2340)
-      .setStrokeStyle(2, 0x4ea1ff)
-      .setInteractive({ useHandCursor: true });
-    this.add
-      .text(cx, 430, "CONFIRM", { fontFamily: "monospace", fontSize: "22px", color: "#ffd166" })
-      .setOrigin(0.5);
-    btn.on("pointerdown", () => this.confirm());
-
-    this.add
-      .text(cx, 500, "tap ▲▼ or type · ← → to move · Enter", {
-        fontFamily: "monospace",
-        fontSize: "13px",
-        color: "#8893b5",
-      })
-      .setOrigin(0.5);
-
-    this.status = this.add
-      .text(cx, 560, "", { fontFamily: "monospace", fontSize: "16px", color: "#ffd166" })
-      .setOrigin(0.5);
-
-    this.bindKeyboard();
+    this.selectSlot(this.current);
   }
 
-  // ---------------------------------------------------------------------------
   private defaultInitials(): number[] {
     let stored = "";
     try {
@@ -141,7 +202,7 @@ export default class NameEntryScene extends Phaser.Scene {
       stored = "";
     }
     const idx: number[] = [];
-    for (let i = 0; i < LEADERBOARD.NAME_LEN; i++) {
+    for (let i = 0; i < LEADERBOARD.NAME_LEN_MAX; i++) {
       const c = stored[i] ?? "A";
       const at = LEADERBOARD.CHARSET.indexOf(c);
       idx.push(at >= 0 ? at : 0);
@@ -149,12 +210,25 @@ export default class NameEntryScene extends Phaser.Scene {
     return idx;
   }
 
+  private defaultLength(): number {
+    let len: number = LEADERBOARD.NAME_LEN_DEFAULT;
+    try {
+      const stored = Number(localStorage.getItem(STORAGE.LAST_LEN));
+      if (Number.isFinite(stored) && stored > 0) len = stored;
+    } catch {
+      // ignore storage failures
+    }
+    return Phaser.Math.Clamp(len, LEADERBOARD.NAME_LEN_MIN, LEADERBOARD.NAME_LEN_MAX);
+  }
+
   private charAt(slot: number): string {
     return LEADERBOARD.CHARSET[this.slotIdx[slot]];
   }
 
   private nameString(): string {
-    return this.slotIdx.map((_, i) => this.charAt(i)).join("");
+    let s = "";
+    for (let i = 0; i < this.nameLen; i++) s += this.charAt(i);
+    return s;
   }
 
   private cycle(slot: number, dir: number): void {
@@ -172,7 +246,7 @@ export default class NameEntryScene extends Phaser.Scene {
   }
 
   private selectSlot(slot: number): void {
-    this.current = Phaser.Math.Clamp(slot, 0, LEADERBOARD.NAME_LEN - 1);
+    this.current = Phaser.Math.Clamp(slot, 0, this.nameLen - 1);
     this.highlight.x = this.slotText[this.current].x;
   }
 
@@ -187,7 +261,7 @@ export default class NameEntryScene extends Phaser.Scene {
       else if (e.key === "Enter") this.confirm();
       else if (/^[a-zA-Z0-9]$/.test(e.key)) {
         this.setChar(this.current, e.key);
-        if (this.current < LEADERBOARD.NAME_LEN - 1) this.selectSlot(this.current + 1);
+        if (this.current < this.nameLen - 1) this.selectSlot(this.current + 1);
       }
     });
   }
@@ -198,6 +272,7 @@ export default class NameEntryScene extends Phaser.Scene {
     const name = this.nameString();
     try {
       localStorage.setItem(STORAGE.LAST_NAME, name);
+      localStorage.setItem(STORAGE.LAST_LEN, String(this.nameLen));
     } catch {
       // Ignore storage failures (private mode / quota); not essential.
     }

@@ -11,7 +11,7 @@ import {
   STORAGE,
 } from "../config/constants";
 import { difficultyAt } from "../config/difficulty";
-import { isLeaderboardEnabled } from "../services/leaderboard";
+import { isLeaderboardEnabled, startMatch } from "../services/leaderboard";
 import Alien from "../objects/Alien";
 
 /**
@@ -117,6 +117,10 @@ export default class GameScene extends Phaser.Scene {
     // --- Enemy spawner: interval & speeds scale with difficulty (see update).
     this.spawnCountdown = 0; // spawn immediately on the first frame
     this.spawnAlien();
+
+    // Open a server-gated match so this run's score can be submitted later.
+    // Fire-and-forget: if it fails the player just gets an unsaved score.
+    void startMatch();
   }
 
   private resetState(): void {
