@@ -65,7 +65,7 @@ src/
 - **Backend: Supabase** (hosted Postgres). The browser uses `supabase-js`
   directly with the **anon public key** (safe — Row-Level Security + CHECK
   constraints guard the `scores` table). No server to host.
-- `scores(id, name char(5), score int 0..1_000_000, created_at)`; RLS allows
+- `scores(id, name varchar(5), score int 0..1_000_000, created_at)`; RLS allows
   anon `SELECT` of all rows and anon `INSERT` only when `name ~ '^[A-Z0-9]{1,5}$'`
   and score is in range. `get_rank(s int)` RPC = `count(*)+1 WHERE score > s`
   (competition ranking; ties share a rank).

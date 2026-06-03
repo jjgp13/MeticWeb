@@ -3,3 +3,8 @@ dist/
 *.log
 .DS_Store
 .vite/
+
+# Local Supabase credentials (never commit)
+.env
+.env.local
+.env.*.local
