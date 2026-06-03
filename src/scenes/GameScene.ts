@@ -148,7 +148,7 @@ export default class GameScene extends Phaser.Scene {
     if (this.gameOver || this.paused) return;
 
     this.elapsedMs += delta;
-    const diff = difficultyAt(this.elapsedMs);
+    const diff = difficultyAt(this.elapsedMs, this.score);
 
     // During the post-hit grace window everything in the field moves in slow
     // motion (the difficulty timer itself keeps running).
@@ -165,13 +165,17 @@ export default class GameScene extends Phaser.Scene {
     }
     this.diffBar.setSize(diff.d * (GAME.WIDTH - 24), 4); // show ramp progress
 
-    // Spawn pacing is gated by the board's current cognitive load, not a blind
-    // clock: hold off while the screen is at its threat ceiling so it never
-    // floods and a hit stays recoverable. Recheck soon instead of waiting a full
-    // interval, so deferred spawns don't pile up and burst once one clears.
+    // Spawn pacing's PRIMARY gate is the number of UNSOLVED aliens (ones the
+    // player still has to do mental math for): start at 1 and open up only as
+    // the player earns points. The weighted threat budget is a secondary net so
+    // the screen never floods and a hit stays recoverable. Recheck soon instead
+    // of waiting a full interval so deferred spawns don't pile up and burst.
     this.spawnCountdown -= fieldDelta;
     if (this.spawnCountdown <= 0) {
-      if (this.currentThreat() < diff.threatBudget) {
+      if (
+        this.unsolvedOnScreen() < diff.maxUnsolved &&
+        this.currentThreat() < diff.threatBudget
+      ) {
         this.spawnAlien();
         this.spawnCountdown = diff.spawnInterval;
       } else {
@@ -202,6 +206,13 @@ export default class GameScene extends Phaser.Scene {
       alien.advance(fieldDelta);
       if (alien.y >= PLAYER.Y - 6) this.onAlienReachedPlayer(alien);
     });
+
+    // A locked (already-answered) target that flees clear off the top counts as
+    // destroyed: resolve it so it can't leave a stale lock blocking targeting.
+    if (this.lockedTarget && this.lockedTarget.active && this.lockedTarget.y < -24) {
+      if (this.lockedBullet) this.lockedBullet.destroy();
+      this.killAlien(this.lockedTarget);
+    }
 
     // Slide the ship toward the target and fire when lined up. Don't fire again
     // while a bullet is already in flight toward this locked target — only
@@ -246,6 +257,16 @@ export default class GameScene extends Phaser.Scene {
     return threat;
   }
 
+  /** Count of UNSOLVED aliens — every live alien except the already-answered
+   * (locked, fleeing) target. Drives the primary spawn gate. */
+  private unsolvedOnScreen(): number {
+    let n = 0;
+    this.aliens.getChildren().forEach((o) => {
+      if ((o as Alien) !== this.lockedTarget) n++;
+    });
+    return n;
+  }
+
   /** Count of live "hard" (multi-number) aliens, excluding the locked target. */
   private hardAliensOnScreen(): number {
     let n = 0;
@@ -260,7 +281,7 @@ export default class GameScene extends Phaser.Scene {
   private spawnAlien(): void {
     if (this.gameOver) return;
 
-    const diff = difficultyAt(this.elapsedMs);
+    const diff = difficultyAt(this.elapsedMs, this.score);
 
     // Don't let the field over-populate — a crowded screen makes a single hit
     // unrecoverable.
@@ -353,6 +374,14 @@ export default class GameScene extends Phaser.Scene {
 
   private onBulletHit(bullet: Phaser.Physics.Arcade.Sprite, alien: Alien): void {
     if (!alien.active) return;
+    bullet.destroy();
+    this.killAlien(alien);
+  }
+
+  /** Award and clean up a destroyed alien. Shared by bullet hits and by a
+   * locked (already-answered) target that flees off the top of the screen. */
+  private killAlien(alien: Alien): void {
+    if (!alien.active) return;
 
     const solveMs = this.time.now - alien.spawnedAt;
 
@@ -374,7 +403,6 @@ export default class GameScene extends Phaser.Scene {
       this.lockedBullet = null;
     }
     alien.kill();
-    bullet.destroy();
   }
 
   /** points = BASE * ballCountBonus * speedBonus * difficultyMult * comboMult. */
@@ -385,7 +413,7 @@ export default class GameScene extends Phaser.Scene {
     const t = Phaser.Math.Clamp((solveMs - SCORE.FAST_MS) / span, 0, 1);
     const speedBonus = SCORE.FAST_MULT + (SCORE.SLOW_MULT - SCORE.FAST_MULT) * t;
 
-    const difficultyMult = 1 + difficultyAt(this.elapsedMs).d;
+    const difficultyMult = 1 + difficultyAt(this.elapsedMs, this.score).d;
     const comboMult = Math.min(SCORE.COMBO_MAX, 1 + (this.combo - 1) * SCORE.COMBO_STEP);
 
     return Math.round(SCORE.BASE * ballBonus * speedBonus * difficultyMult * comboMult);

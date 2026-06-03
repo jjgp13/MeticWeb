@@ -128,20 +128,21 @@ Green=multiplication, Yellow=division.
   (`lockedTarget`) until a bullet destroys it** — independent of the typed
   string — so a committed kill keeps fleeing instead of turning back. If a
   fleeing target is at/below the muzzle the shot resolves point-blank.
-- **Spawn pacing is board-state-aware, not a blind clock.** Each alien has a
-  cognitive-load weight (`ENEMY.THREAT_BY_BALLS`: 2-ball=1, 3-ball=2, 4-ball=3);
-  new spawns are withheld while the live total is at/above the difficulty-scaled
-  `threatBudget` (3→8), rechecking every `ENEMY.SPAWN_RETRY_MS` (350ms) so the
-  screen never floods and a hit stays recoverable. Already-answered (locked,
-  fleeing) aliens don't count toward the budget.
+- **Spawn pacing's primary gate is the count of UNSOLVED aliens.** The player
+  starts facing **one unsolved sum at a time** (`DIFFICULTY.MAX_UNSOLVED` 1→3);
+  the cap opens up only as they **score points** (it is driven by `dScore`
+  alone, see Difficulty design). Already-answered (locked, fleeing) aliens don't
+  count. A secondary weighted threat budget (`ENEMY.THREAT_BY_BALLS`:
+  2-ball=1, 3-ball=2, 4-ball=3 vs `threatBudget` 3→8) and the absolute
+  `maxOnScreen` cap (4→8) are safety nets; spawns recheck every
+  `ENEMY.SPAWN_RETRY_MS` (350ms) so deferred spawns don't pile up and burst.
 - **Concurrent "hard" enemies are capped.** Aliens with
   `≥ ENEMY.HARD_BALL_THRESHOLD` (3) balls are slow multi-number sums; only one
   may be on screen until late game (`DIFFICULTY.SECOND_HARD_AT` = d≥0.85, then
   two), so the player never juggles two multi-number sums at once. When the cap
   is hit the spawn is forced to an easy 2-ball enemy.
-- Field is also capped at `maxOnScreen` aliens (difficulty-scaled, 4→8) as an
-  absolute safety net; the threat budget is the primary gate and usually binds
-  first. Spawns are skipped when no clear lane exists.
+- A locked (already-answered) target that **flees clear off the top** is resolved
+  as a kill (`killAlien`), so a stale lock can never block future targeting.
 - Input: on-screen keypad **and** physical keyboard (0–9, Backspace, Esc).
   Max 2 typed digits.
 - HUD (score, lives, difficulty bar, typed display) draws above gameplay
@@ -157,29 +158,34 @@ Green=multiplication, Yellow=division.
 
 ## Difficulty design
 
-Difficulty is a normalized value `d(t) ∈ [0,1)` from a **logistic (sigmoid)**
-curve of elapsed time — chosen for a gentle warm-up, smooth mid-game ramp, and a
-plateau (hard but never impossible):
+Difficulty is a normalized value `d ∈ [0,1)` that is **score-led with a gentle
+time floor** — the player *earns* difficulty by scoring, so a struggling player
+is never overwhelmed while a skilled one ramps up fast:
 
 ```
-d(t) = 1 / (1 + e^(-k · (t - t0)))
+dScore     = score / (score + SCORE_HALF)        // earned via points (0.5 at SCORE_HALF)
+dTimeFloor = min( logistic(t), TIME_FLOOR_MAX )  // slow ramp for everyone
+d          = max( dScore, dTimeFloor )           // monotonic, never decreases
+logistic(t)= 1 / (1 + e^(-k · (t - t0)))
 ```
 
-`t` = seconds, `t0` = `DIFFICULTY.MIDPOINT` (50s, where d=0.5), `k` =
-`DIFFICULTY.STEEPNESS` (0.055). Every concrete parameter is then
-`easy + (hard - easy)·d`:
+`SCORE_HALF` = 6000 pts, `TIME_FLOOR_MAX` = 0.4, `t0` = `DIFFICULTY.MIDPOINT`
+(50s), `k` = `DIFFICULTY.STEEPNESS` (0.055). Most parameters lerp on the blended
+`d` as `easy + (hard - easy)·d`, **except `maxUnsolved`, which uses `dScore`
+alone** so the number of concurrent unsolved sums grows only with points:
 
-| Parameter      | easy | hard |
-| -------------- | ---- | ---- |
-| Fall speed     | 28   | 110 px/s |
-| Home speed     | 45   | 150 px/s (speed-up below `HOME_TRIGGER_Y`) |
-| Spawn interval | 2200 | 650 ms |
-| Max on screen  | 4    | 8    |
-| Max balls      | 2    | 3    |
-| Max digit      | 3    | 9    |
+| Parameter      | easy | hard | driver |
+| -------------- | ---- | ---- | ------ |
+| Max unsolved   | 1    | 3    | **dScore only** (1 at start, 2 at ~2k, 3 at ~18k pts) |
+| Fall speed     | 28   | 110 px/s | d |
+| Home speed     | 45   | 150 px/s | d |
+| Spawn interval | 2200 | 650 ms | d |
+| Max on screen  | 4    | 8    | d (safety net) |
+| Max balls      | 2    | 3    | d |
+| Max digit      | 3    | 9    | d |
 
 `MIN_BALLS` is fixed at 2. All knobs live in `src/config/constants.ts`; the
-curve is in `src/config/difficulty.ts`.
+curve is in `src/config/difficulty.ts` (`difficultyAt(elapsedMs, score)`).
 
 ## Roadmap
 
@@ -215,6 +221,15 @@ curve is in `src/config/difficulty.ts`.
 
 Newest first. Format: `YYYY-MM-DD — decision — rationale`.
 
+- **2026-06-02 — Score-led difficulty + "unsolved" spawn cap; double-bullet fix.**
+  Difficulty is now `d = max(dScore, dTimeFloor)` (score earns difficulty; time
+  is only a gentle floor). The primary spawn gate is the count of UNSOLVED aliens
+  (`MAX_UNSOLVED` 1→3, driven by `dScore` alone) so the player starts with one sum
+  at a time and the board opens up as they score — fixing "4 on screen is too
+  much." A locked target that flees off the top is resolved as a kill to avoid a
+  stale-lock softlock. Also fixed a double-bullet bug: the ship no longer fires a
+  second shot while one is already in flight at the locked target (re-fires only
+  if it misses).
 - **2026-05-29 — Arcade global leaderboard on Supabase + GitHub Pages.** Game
   over → 5-char initials entry → submit → world rank + top-N board. Browser uses
   `supabase-js` with the public anon key (RLS + CHECK constraints protect the

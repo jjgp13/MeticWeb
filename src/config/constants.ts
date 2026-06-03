@@ -136,6 +136,19 @@ export const DIFFICULTY = {
   // never juggles two slow multi-number sums until very late game.
   SECOND_HARD_AT: 0.85,
 
+  // Progression is SCORE-LED (the player earns difficulty), with a gentle
+  // time-based floor so a struggling/idle player still sees a slow ramp.
+  //   dScore = score / (score + SCORE_HALF)   (0 at start, 0.5 at SCORE_HALF)
+  //   dTimeFloor = min(logistic(t), TIME_FLOOR_MAX)
+  //   d = max(dScore, dTimeFloor)
+  SCORE_HALF: 6000, // points at which score-driven difficulty reaches 0.5
+  TIME_FLOOR_MAX: 0.4, // most the time floor alone can raise difficulty
+
+  // Concurrent UNSOLVED aliens the player must juggle (not yet answered). This
+  // is the primary spawn gate and is driven by score ALONE (dScore), so the
+  // board opens up only as the player earns points: 1 → 2 → 3.
+  MAX_UNSOLVED: { easy: 1, hard: 3 },
+
   // A sum needs at least two numbers, so always >= 2 balls.
   MIN_BALLS: 2,
   MAX_BALLS: { easy: 2, hard: 3 },

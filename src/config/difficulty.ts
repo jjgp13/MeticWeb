@@ -1,7 +1,7 @@
 import { DIFFICULTY } from "./constants";
 
 export interface DifficultyParams {
-  /** Normalized difficulty in [0,1). 0 = easiest, approaches 1 over time. */
+  /** Normalized difficulty in [0,1). 0 = easiest, approaches 1 with score/time. */
   d: number;
   fallSpeed: number;
   homeSpeed: number;
@@ -13,20 +13,31 @@ export interface DifficultyParams {
   threatBudget: number;
   /** Max concurrent "hard" (multi-number) aliens allowed right now. */
   maxHardOnScreen: number;
+  /** Max concurrent UNSOLVED aliens (primary spawn gate); score-driven, 1→3. */
+  maxUnsolved: number;
 }
 
 type Range = { easy: number; hard: number };
 
 /**
- * Logistic difficulty curve. See DIFFICULTY in constants.ts for the rationale.
+ * Score-led difficulty curve with a gentle time floor. See DIFFICULTY in
+ * constants.ts for the rationale.
  *
- *   d(t) = 1 / (1 + e^(-k * (t - t0)))
+ *   dScore     = score / (score + SCORE_HALF)        // earned via points
+ *   dTimeFloor = min(logistic(t), TIME_FLOOR_MAX)    // slow ramp for everyone
+ *   d          = max(dScore, dTimeFloor)             // monotonic, never drops
+ *
+ * Most params lerp on the blended `d`, but `maxUnsolved` uses `dScore` ALONE so
+ * the number of simultaneous unsolved sums grows only as the player scores.
  */
-export function difficultyAt(elapsedMs: number): DifficultyParams {
+export function difficultyAt(elapsedMs: number, score = 0): DifficultyParams {
   const t = elapsedMs / 1000; // seconds
-  const d = 1 / (1 + Math.exp(-DIFFICULTY.STEEPNESS * (t - DIFFICULTY.MIDPOINT)));
+  const dTime = 1 / (1 + Math.exp(-DIFFICULTY.STEEPNESS * (t - DIFFICULTY.MIDPOINT)));
+  const dTimeFloor = Math.min(dTime, DIFFICULTY.TIME_FLOOR_MAX);
+  const dScore = score / (score + DIFFICULTY.SCORE_HALF); // 0 at score 0, →1
+  const d = Math.max(dScore, dTimeFloor);
 
-  const lerp = (r: Range) => r.easy + (r.hard - r.easy) * d;
+  const lerp = (r: Range, x: number = d) => r.easy + (r.hard - r.easy) * x;
 
   return {
     d,
@@ -39,5 +50,7 @@ export function difficultyAt(elapsedMs: number): DifficultyParams {
     threatBudget: lerp(DIFFICULTY.THREAT_BUDGET),
     // Stay at a single hard enemy until late game, then allow a second.
     maxHardOnScreen: d < DIFFICULTY.SECOND_HARD_AT ? 1 : 2,
+    // Score ALONE opens up concurrent unsolved sums (1 → 2 → 3).
+    maxUnsolved: Math.round(lerp(DIFFICULTY.MAX_UNSOLVED, dScore)),
   };
 }
