@@ -61,8 +61,10 @@ export default class GameScene extends Phaser.Scene {
   private spawnCountdown = 0;
   private diffBar!: Phaser.GameObjects.Rectangle;
 
-  // Hit-recovery: a short slow-motion grace window after a hit.
-  private recoveryUntil = 0;
+  // Hit-recovery: the field freezes until `freezeUntil`, then (once the player
+  // has been hit at least once) runs at POST_HIT_FACTOR for the rest of the run.
+  private freezeUntil = 0;
+  private postHitSlow = false;
 
   // Pause: while paused the field is frozen and aliens are hidden so the
   // player can't keep solving sums during the break.
@@ -143,7 +145,8 @@ export default class GameScene extends Phaser.Scene {
     this.gameOver = false;
     this.proceeding = false;
     this.newHighScore = false;
-    this.recoveryUntil = 0;
+    this.freezeUntil = 0;
+    this.postHitSlow = false;
     this.paused = false;
     this.pauseOverlay = [];
   }
@@ -154,9 +157,10 @@ export default class GameScene extends Phaser.Scene {
     this.elapsedMs += delta;
     const diff = difficultyAt(this.elapsedMs, this.score);
 
-    // During the post-hit grace window everything in the field moves in slow
-    // motion (the difficulty timer itself keeps running).
-    const slow = time < this.recoveryUntil ? RECOVERY.SLOW_FACTOR : 1;
+    // After a hit the field FREEZES for a few seconds (factor 0), then resumes at
+    // POST_HIT_FACTOR for the rest of the run. The difficulty timer keeps running
+    // underneath, so absolute speed still climbs over time.
+    const slow = time < this.freezeUntil ? 0 : this.postHitSlow ? RECOVERY.POST_HIT_FACTOR : 1;
     const fieldDelta = delta * slow;
 
     // Drift stars downward with parallax; wrap back to the top.
@@ -198,25 +202,15 @@ export default class GameScene extends Phaser.Scene {
     }
 
     // Advance every alien; detect ones that reached the player line. The active
-    // target FLEES upward: once the player has typed its answer it turns and
-    // runs from the player while the ship lines up the shot, so a correct answer
-    // is never punished by the ship's travel time.
+    // target STOPS while it is locked on: once the player has typed its answer it
+    // holds position while the ship lines up the shot, so a correct answer is
+    // never punished by the ship's travel time (and it can't cost a life).
     this.aliens.getChildren().forEach((obj) => {
       const alien = obj as Alien;
-      if (alien === this.target) {
-        alien.retreat(fieldDelta, ENEMY.RETREAT_SPEED);
-        return;
-      }
+      if (alien === this.target) return; // hold still while targeted
       alien.advance(fieldDelta);
       if (alien.y >= PLAYER.Y - 6) this.onAlienReachedPlayer(alien);
     });
-
-    // A locked (already-answered) target that flees clear off the top counts as
-    // destroyed: resolve it so it can't leave a stale lock blocking targeting.
-    if (this.lockedTarget && this.lockedTarget.active && this.lockedTarget.y < -24) {
-      if (this.lockedBullet) this.lockedBullet.destroy();
-      this.killAlien(this.lockedTarget);
-    }
 
     // Slide the ship toward the target and fire when lined up. Don't fire again
     // while a bullet is already in flight toward this locked target — only
@@ -382,8 +376,7 @@ export default class GameScene extends Phaser.Scene {
     this.killAlien(alien);
   }
 
-  /** Award and clean up a destroyed alien. Shared by bullet hits and by a
-   * locked (already-answered) target that flees off the top of the screen. */
+  /** Award and clean up a destroyed alien. */
   private killAlien(alien: Alien): void {
     if (!alien.active) return;
 
@@ -484,8 +477,10 @@ export default class GameScene extends Phaser.Scene {
       this.endGame();
       return;
     }
-    // Slow-motion grace window so the player can recover after a hit.
-    this.recoveryUntil = this.time.now + RECOVERY.SLOWMO_MS;
+    // Freeze the whole field for a few seconds so the player can recover, then
+    // run at a reduced speed for the rest of the run (difficulty keeps ramping).
+    this.freezeUntil = this.time.now + RECOVERY.FREEZE_MS;
+    this.postHitSlow = true;
   }
 
   /** Freeze the field and hide aliens so the player can't solve while paused. */

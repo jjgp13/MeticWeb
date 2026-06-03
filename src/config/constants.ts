@@ -23,7 +23,6 @@ export const BULLET = {
 export const ENEMY = {
   HOME_TRIGGER_Y: 220, // y after which an alien speeds up toward the player
   MIN_SPAWN_GAP: 84, // px min horizontal distance between alien lanes
-  RETREAT_SPEED: 150, // px/sec a locked (correctly-answered) alien flees upward
 
   // Personality: speed scales INVERSELY with how many numbers an alien carries.
   // A 2-number sum is quick to solve, so those aliens dart in faster; 3+ numbers
@@ -161,12 +160,14 @@ export const DIFFICULTY = {
 
 /**
  * Hit-recovery: after losing a life on a crowded screen the player needs a
- * moment to recover. A short slow-motion grace window slows the whole field so
- * there is time to read and answer the next sum.
+ * moment to recover. The whole field FREEZES for FREEZE_MS so there is time to
+ * read and answer the next sum, then resumes at POST_HIT_FACTOR of normal speed
+ * for the rest of the run (the difficulty curve keeps ramping underneath, so
+ * absolute speed still climbs over time). The slowdown is flat, not stacking.
  */
 export const RECOVERY = {
-  SLOWMO_MS: 3000, // duration of the slow-motion grace window
-  SLOW_FACTOR: 0.4, // alien speed + spawn multiplier during the grace window
+  FREEZE_MS: 3000, // field is completely frozen for this long after a hit
+  POST_HIT_FACTOR: 0.8, // field speed multiplier once movement resumes
 } as const;
 
 /** Number ball colors map to future math operations (sum/sub/mul/div). */

@@ -95,13 +95,6 @@ export default class Alien extends Phaser.Physics.Arcade.Sprite {
     this.syncBalls();
   }
 
-  /** Flee straight up (used while locked: the player answered correctly). */
-  public retreat(delta: number, speed: number): void {
-    const dt = delta / 1000;
-    this.y = Math.max(8, this.y - speed * dt);
-    this.syncBalls();
-  }
-
   /** Show/hide the body and its number balls together (used while paused). */
   public setVisibleAll(visible: boolean): void {
     this.setVisible(visible);

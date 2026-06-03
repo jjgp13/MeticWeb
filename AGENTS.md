@@ -146,17 +146,17 @@ Green=multiplication, Yellow=division.
   (min gap `ENEMY.MIN_SPAWN_GAP`); if no clear lane, the spawn is skipped.
 - Ship is input-driven only: it lerps horizontally to the targeted alien's x and
   auto-fires when lined up (`PLAYER.SHOOT_RANGE`, `FIRE_COOLDOWN`). The **active
-  target flees upward** while locked (`ENEMY.RETREAT_SPEED`): once its answer is
-  typed it runs from the player and cannot cost a life, so a correct answer is
-  never punished by the ship's travel time. The target stays **locked
-  (`lockedTarget`) until a bullet destroys it** — independent of the typed
-  string — so a committed kill keeps fleeing instead of turning back. If a
-  fleeing target is at/below the muzzle the shot resolves point-blank.
+  target STOPS** while locked: once its answer is typed it holds position (it
+  does not advance and cannot cost a life), so a correct answer is never punished
+  by the ship's travel time. The target stays **locked (`lockedTarget`) until a
+  bullet destroys it** — independent of the typed string — so a committed kill
+  stays committed. If a held target is at/below the muzzle the shot resolves
+  point-blank.
 - **Spawn pacing's primary gate is the count of UNSOLVED aliens.** The player
   starts facing **one unsolved sum at a time** (`DIFFICULTY.MAX_UNSOLVED` 1→3);
   the cap opens up only as they **score points** (it is driven by `dScore`
-  alone, see Difficulty design). Already-answered (locked, fleeing) aliens don't
-  count. A secondary weighted threat budget (`ENEMY.THREAT_BY_BALLS`:
+  alone, see Difficulty design). Already-answered (locked) aliens don't count. A
+  secondary weighted threat budget (`ENEMY.THREAT_BY_BALLS`:
   2-ball=1, 3-ball=2, 4-ball=3 vs `threatBudget` 3→8) and the absolute
   `maxOnScreen` cap (4→8) are safety nets; spawns recheck every
   `ENEMY.SPAWN_RETRY_MS` (350ms) so deferred spawns don't pile up and burst.
@@ -165,8 +165,6 @@ Green=multiplication, Yellow=division.
   may be on screen until late game (`DIFFICULTY.SECOND_HARD_AT` = d≥0.85, then
   two), so the player never juggles two multi-number sums at once. When the cap
   is hit the spawn is forced to an easy 2-ball enemy.
-- A locked (already-answered) target that **flees clear off the top** is resolved
-  as a kill (`killAlien`), so a stale lock can never block future targeting.
 - Input: on-screen keypad **and** physical keyboard (0–9, Backspace, Esc).
   Max 2 typed digits.
 - HUD (score, lives, difficulty bar, typed display) draws above gameplay
@@ -176,9 +174,12 @@ Green=multiplication, Yellow=division.
   timer, spawning and firing, and **hides all aliens + their number balls** (and
   the typed display) behind an overlay so the player can't solve sums on a break.
   Tap the overlay or press `P` to resume.
-- **Hit recovery**: on losing a life (but not the last) a short slow-motion grace
-  window (`RECOVERY.SLOWMO_MS` at `SLOW_FACTOR`) slows the whole field so the
-  player can read and answer the next sum and recover.
+- **Hit recovery**: on losing a life (but not the last) the whole field **freezes
+  for `RECOVERY.FREEZE_MS` (3s)** so the player can read the board, then resumes
+  at `RECOVERY.POST_HIT_FACTOR` (80%) speed for the rest of the run. The slowdown
+  is flat (non-stacking) and the difficulty curve keeps ramping underneath, so
+  absolute speed still climbs over time. The ship can still fire during the
+  freeze (so a frozen board can be cleared).
 
 ## Difficulty design
 
@@ -216,8 +217,8 @@ curve is in `src/config/difficulty.ts` (`difficultyAt(elapsedMs, score)`).
 1. [x] Core loop (keypad/keyboard input)
 2. [x] Static sprites + logistic difficulty ramp + parallax starfield
 3. [x] ≥2-number sums + no-overlap lanes
-4. [x] Pause (hides field) + slow-mo hit recovery
-5. [x] Fair targeting: locked target flees upward; concurrent-alien cap
+4. [x] Pause (hides field) + freeze-then-slow hit recovery
+5. [x] Fair targeting: locked target holds still; concurrent-alien cap
 6. [x] Enemy personality by ball count + skill-based scoring + mastery ranks
 7. [ ] **Drifter bonus enemy** — non-lethal alien that crosses horizontally
        (`behavior: "wander"`); spot & solve it for bonus points, no life cost.
@@ -244,6 +245,15 @@ curve is in `src/config/difficulty.ts` (`difficultyAt(elapsedMs, score)`).
 ## Decision Log
 
 Newest first. Format: `YYYY-MM-DD — decision — rationale`.
+
+- **2026-06-02 — Locked target holds still; freeze-then-slow hit recovery.**
+  Replaced the "flees upward" (`RETREAT_SPEED`) behavior — an answered target now
+  simply STOPS (still can't cost a life, point-blank shot if at the muzzle),
+  which reads cleaner and removed the off-top stale-lock special case. Replaced
+  slow-mo recovery (`SLOWMO_MS`/`SLOW_FACTOR`) with a hard FREEZE of the field for
+  `RECOVERY.FREEZE_MS` (3s) on a non-final hit, then a flat `POST_HIT_FACTOR`
+  (80%) for the rest of the run while the difficulty curve keeps ramping. Gives a
+  clear "catch your breath" beat and a lasting but non-crippling slowdown.
 
 - **2026-06-02 — Server-gated score submission + 3–6 char names.** Players now
   choose 3–6 initials (DB `name` widened to `varchar(6)`, regex `{3,6}`). Score
