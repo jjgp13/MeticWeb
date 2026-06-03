@@ -31,6 +31,9 @@ export default class GameScene extends Phaser.Scene {
   /** Once we fire on a target it stays locked (and fleeing) until destroyed,
    * independent of the typed string, so a committed kill never turns back. */
   private lockedTarget: Alien | null = null;
+  /** The in-flight bullet aimed at lockedTarget; prevents firing a second
+   * bullet while one is already on its way (re-fires only if it misses). */
+  private lockedBullet: Phaser.Physics.Arcade.Sprite | null = null;
 
   private typed = "";
   private typedText!: Phaser.GameObjects.Text;
@@ -120,6 +123,7 @@ export default class GameScene extends Phaser.Scene {
     this.enemiesInField.clear();
     this.target = null;
     this.lockedTarget = null;
+    this.lockedBullet = null;
     this.typed = "";
     this.score = 0;
     this.lives = PLAYER.LIVES;
@@ -199,10 +203,17 @@ export default class GameScene extends Phaser.Scene {
       if (alien.y >= PLAYER.Y - 6) this.onAlienReachedPlayer(alien);
     });
 
-    // Slide the ship toward the target and fire when lined up.
+    // Slide the ship toward the target and fire when lined up. Don't fire again
+    // while a bullet is already in flight toward this locked target — only
+    // re-fire if that shot missed (its bullet was recycled off-screen).
     if (this.target && this.target.active) {
       this.ship.x = Phaser.Math.Linear(this.ship.x, this.target.x, PLAYER.MOVE_LERP);
+      const shotInFlight =
+        this.lockedTarget === this.target &&
+        this.lockedBullet !== null &&
+        this.lockedBullet.active;
       if (
+        !shotInFlight &&
         Math.abs(this.ship.x - this.target.x) < PLAYER.SHOOT_RANGE &&
         time - this.lastFire > PLAYER.FIRE_COOLDOWN
       ) {
@@ -328,7 +339,10 @@ export default class GameScene extends Phaser.Scene {
     // Clear the typed answer once we have committed to a shot, but keep the
     // target LOCKED so it keeps fleeing until a bullet actually destroys it.
     this.setTyped("");
-    if (target && target.active) this.lockedTarget = target;
+    if (target && target.active) {
+      this.lockedTarget = target;
+      this.lockedBullet = bullet;
+    }
 
     // If the locked target sits at/below the muzzle, an upward bullet can't
     // reach it, so resolve the hit point-blank to guarantee the kill.
@@ -355,7 +369,10 @@ export default class GameScene extends Phaser.Scene {
     this.addScore(points, alien.x, alien.y);
 
     this.enemiesInField.delete(alien.result);
-    if (this.lockedTarget === alien) this.lockedTarget = null;
+    if (this.lockedTarget === alien) {
+      this.lockedTarget = null;
+      this.lockedBullet = null;
+    }
     alien.kill();
     bullet.destroy();
   }
